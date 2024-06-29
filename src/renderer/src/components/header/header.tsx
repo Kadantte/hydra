@@ -7,6 +7,7 @@ import { useAppDispatch, useAppSelector } from "@renderer/hooks";
 
 import * as styles from "./header.css";
 import { clearSearch } from "@renderer/features";
+import { AutoUpdateSubHeader } from "./auto-update-sub-header";
 
 export interface HeaderProps {
   onSearch: (query: string) => void;
@@ -38,6 +39,7 @@ export function Header({ onSearch, onClear, search }: HeaderProps) {
 
   const title = useMemo(() => {
     if (location.pathname.startsWith("/game")) return headerTitle;
+    if (location.pathname.startsWith("/user")) return headerTitle;
     if (location.pathname.startsWith("/search")) return t("search_results");
 
     return t(pathTitle[location.pathname]);
@@ -63,64 +65,69 @@ export function Header({ onSearch, onClear, search }: HeaderProps) {
   };
 
   return (
-    <header
-      className={styles.header({
-        draggingDisabled,
-        isWindows: window.electron.platform === "win32",
-      })}
-    >
-      <div className={styles.section}>
-        <button
-          type="button"
-          className={styles.backButton({ enabled: location.key !== "default" })}
-          onClick={handleBackButtonClick}
-          disabled={location.key === "default"}
-        >
-          <ArrowLeftIcon />
-        </button>
-
-        <h3
-          className={styles.title({
-            hasBackButton: location.key !== "default",
-          })}
-        >
-          {title}
-        </h3>
-      </div>
-
-      <section className={styles.section}>
-        <div className={styles.search({ focused: isFocused })}>
+    <>
+      <header
+        className={styles.header({
+          draggingDisabled,
+          isWindows: window.electron.platform === "win32",
+        })}
+      >
+        <section className={styles.section}>
           <button
             type="button"
-            className={styles.actionButton}
-            onClick={focusInput}
+            className={styles.backButton({
+              enabled: location.key !== "default",
+            })}
+            onClick={handleBackButtonClick}
+            disabled={location.key === "default"}
           >
-            <SearchIcon />
+            <ArrowLeftIcon />
           </button>
 
-          <input
-            ref={inputRef}
-            type="text"
-            name="search"
-            placeholder={t("search")}
-            value={search}
-            className={styles.searchInput}
-            onChange={(event) => onSearch(event.target.value)}
-            onFocus={() => setIsFocused(true)}
-            onBlur={handleBlur}
-          />
+          <h3
+            className={styles.title({
+              hasBackButton: location.key !== "default",
+            })}
+          >
+            {title}
+          </h3>
+        </section>
 
-          {search && (
+        <section className={styles.section}>
+          <div className={styles.search({ focused: isFocused })}>
             <button
               type="button"
-              onClick={onClear}
               className={styles.actionButton}
+              onClick={focusInput}
             >
-              <XIcon />
+              <SearchIcon />
             </button>
-          )}
-        </div>
-      </section>
-    </header>
+
+            <input
+              ref={inputRef}
+              type="text"
+              name="search"
+              placeholder={t("search")}
+              value={search}
+              className={styles.searchInput}
+              onChange={(event) => onSearch(event.target.value)}
+              onFocus={() => setIsFocused(true)}
+              onBlur={handleBlur}
+            />
+
+            {search && (
+              <button
+                type="button"
+                onClick={onClear}
+                className={styles.actionButton}
+              >
+                <XIcon />
+              </button>
+            )}
+          </div>
+        </section>
+      </header>
+      <AutoUpdateSubHeader />
+    </>
   );
 }

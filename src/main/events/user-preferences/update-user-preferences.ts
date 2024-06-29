@@ -6,16 +6,13 @@ import type { UserPreferences } from "@types";
 const updateUserPreferences = async (
   _event: Electron.IpcMainInvokeEvent,
   preferences: Partial<UserPreferences>
-) => {
-  await userPreferencesRepository.upsert(
+) =>
+  userPreferencesRepository.upsert(
     {
       id: 1,
       ...preferences,
     },
     ["id"]
   );
-};
 
-registerEvent(updateUserPreferences, {
-  name: "updateUserPreferences",
-});
+registerEvent("updateUserPreferences", updateUserPreferences);

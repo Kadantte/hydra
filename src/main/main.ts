@@ -1,129 +1,60 @@
-import { stateManager } from "./state-manager";
-import { GameStatus, repackers } from "./constants";
+import { DownloadManager, RepacksManager, startMainLoop } from "./services";
 import {
-  getNewGOGGames,
-  getNewRepacksFromCPG,
-  getNewRepacksFromUser,
-  getNewRepacksFromXatab,
-  // getNewRepacksFromOnlineFix,
-  readPipe,
-  startProcessWatcher,
-  writePipe,
-} from "./services";
-import {
-  gameRepository,
+  downloadQueueRepository,
   repackRepository,
-  repackerFriendlyNameRepository,
-  steamGameRepository,
   userPreferencesRepository,
 } from "./repository";
-import { TorrentClient } from "./services/torrent-client";
-import { Repack } from "./entity";
-import { Notification } from "electron";
-import { t } from "i18next";
-import { In } from "typeorm";
+import { UserPreferences } from "./entity";
+import { RealDebridClient } from "./services/real-debrid";
+import { fetchDownloadSourcesAndUpdate } from "./helpers";
+import { publishNewRepacksNotifications } from "./services/notifications";
+import { MoreThan } from "typeorm";
+import { HydraApi } from "./services/hydra-api";
+import { uploadGamesBatch } from "./services/library-sync";
 
-startProcessWatcher();
+startMainLoop();
 
-TorrentClient.startTorrentClient(writePipe.socketPath, readPipe.socketPath);
-
-Promise.all([writePipe.createPipe(), readPipe.createPipe()]).then(async () => {
-  const game = await gameRepository.findOne({
-    where: {
-      status: In([
-        GameStatus.Downloading,
-        GameStatus.DownloadingMetadata,
-        GameStatus.CheckingFiles,
-      ]),
-    },
-    relations: { repack: true },
-  });
-
-  if (game) {
-    writePipe.write({
-      action: "start",
-      game_id: game.id,
-      magnet: game.repack.magnet,
-      save_path: game.downloadPath,
-    });
-  }
-
-  readPipe.socket?.on("data", (data) => {
-    TorrentClient.onSocketData(data);
-  });
-});
-
-const track1337xUsers = async (existingRepacks: Repack[]) => {
-  for (const repacker of repackers) {
-    await getNewRepacksFromUser(
-      repacker,
-      existingRepacks.filter((repack) => repack.repacker === repacker)
-    );
-  }
-};
-
-const checkForNewRepacks = async () => {
-  const userPreferences = await userPreferencesRepository.findOne({
-    where: { id: 1 },
-  });
-
-  const existingRepacks = stateManager.getValue("repacks");
-
-  Promise.allSettled([
-    getNewGOGGames(
-      existingRepacks.filter((repack) => repack.repacker === "GOG")
-    ),
-    getNewRepacksFromXatab(
-      existingRepacks.filter((repack) => repack.repacker === "Xatab")
-    ),
-    getNewRepacksFromCPG(
-      existingRepacks.filter((repack) => repack.repacker === "CPG")
-    ),
-    // getNewRepacksFromOnlineFix(
-    //   existingRepacks.filter((repack) => repack.repacker === "onlinefix")
-    // ),
-    track1337xUsers(existingRepacks),
-  ]).then(() => {
-    repackRepository.count().then((count) => {
-      const total = count - stateManager.getValue("repacks").length;
-
-      if (total > 0 && userPreferences?.repackUpdatesNotificationsEnabled) {
-        new Notification({
-          title: t("repack_list_updated", {
-            ns: "notifications",
-            lng: userPreferences?.language || "en",
-          }),
-          body: t("repack_count", {
-            ns: "notifications",
-            lng: userPreferences?.language || "en",
-            count: total,
-          }),
-        }).show();
-      }
-    });
-  });
-};
-
-const loadState = async () => {
-  const [friendlyNames, repacks, steamGames] = await Promise.all([
-    repackerFriendlyNameRepository.find(),
-    repackRepository.find({
-      order: {
-        createdAt: "desc",
-      },
-    }),
-    steamGameRepository.find({
-      order: {
-        name: "asc",
-      },
-    }),
-  ]);
-
-  stateManager.setValue("repackersFriendlyNames", friendlyNames);
-  stateManager.setValue("repacks", repacks);
-  stateManager.setValue("steamGames", steamGames);
+const loadState = async (userPreferences: UserPreferences | null) => {
+  await RepacksManager.updateRepacks();
 
   import("./events");
+
+  if (userPreferences?.realDebridApiToken)
+    RealDebridClient.authorize(userPreferences?.realDebridApiToken);
+
+  HydraApi.setupApi().then(async () => {
+    if (HydraApi.isLoggedIn()) uploadGamesBatch();
+  });
+
+  const [nextQueueItem] = await downloadQueueRepository.find({
+    order: {
+      id: "DESC",
+    },
+    relations: {
+      game: true,
+    },
+  });
+
+  if (nextQueueItem?.game.status === "active")
+    DownloadManager.startDownload(nextQueueItem.game);
+
+  const now = new Date();
+
+  fetchDownloadSourcesAndUpdate().then(async () => {
+    const newRepacksCount = await repackRepository.count({
+      where: {
+        createdAt: MoreThan(now),
+      },
+    });
+
+    if (newRepacksCount > 0) publishNewRepacksNotifications(newRepacksCount);
+  });
 };
 
-loadState().then(() => checkForNewRepacks());
+userPreferencesRepository
+  .findOne({
+    where: { id: 1 },
+  })
+  .then((userPreferences) => {
+    loadState(userPreferences);
+  });

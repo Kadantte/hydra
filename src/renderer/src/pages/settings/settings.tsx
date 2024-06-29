@@ -1,113 +1,71 @@
-import { useEffect, useState } from "react";
-import { Button, CheckboxField, TextField } from "@renderer/components";
+import { Button } from "@renderer/components";
 
 import * as styles from "./settings.css";
 import { useTranslation } from "react-i18next";
-import { UserPreferences } from "@types";
+import { SettingsRealDebrid } from "./settings-real-debrid";
+import { SettingsGeneral } from "./settings-general";
+import { SettingsBehavior } from "./settings-behavior";
+
+import { SettingsDownloadSources } from "./settings-download-sources";
+import {
+  SettingsContextConsumer,
+  SettingsContextProvider,
+} from "@renderer/context";
 
 export function Settings() {
-  const [form, setForm] = useState({
-    downloadsPath: "",
-    downloadNotificationsEnabled: false,
-    repackUpdatesNotificationsEnabled: false,
-    telemetryEnabled: false,
-  });
-
   const { t } = useTranslation("settings");
 
-  useEffect(() => {
-    Promise.all([
-      window.electron.getDefaultDownloadsPath(),
-      window.electron.getUserPreferences(),
-    ]).then(([path, userPreferences]) => {
-      setForm({
-        downloadsPath: userPreferences?.downloadsPath || path,
-        downloadNotificationsEnabled:
-          userPreferences?.downloadNotificationsEnabled ?? false,
-        repackUpdatesNotificationsEnabled:
-          userPreferences?.repackUpdatesNotificationsEnabled ?? false,
-        telemetryEnabled: userPreferences?.telemetryEnabled ?? false,
-      });
-    });
-  }, []);
-
-  const updateUserPreferences = <T extends keyof UserPreferences>(
-    field: T,
-    value: UserPreferences[T]
-  ) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-
-    window.electron.updateUserPreferences({
-      [field]: value,
-    });
-  };
-
-  const handleChooseDownloadsPath = async () => {
-    const { filePaths } = await window.electron.showOpenDialog({
-      defaultPath: form.downloadsPath,
-      properties: ["openDirectory"],
-    });
-
-    if (filePaths && filePaths.length > 0) {
-      const path = filePaths[0];
-      updateUserPreferences("downloadsPath", path);
-    }
-  };
+  const categories = [
+    t("general"),
+    t("behavior"),
+    t("download_sources"),
+    "Real-Debrid",
+  ];
 
   return (
-    <section className={styles.container}>
-      <div className={styles.content}>
-        <div className={styles.downloadsPathField}>
-          <TextField
-            label={t("downloads_path")}
-            value={form.downloadsPath}
-            readOnly
-            disabled
-          />
+    <SettingsContextProvider>
+      <SettingsContextConsumer>
+        {({ currentCategoryIndex, setCurrentCategoryIndex }) => {
+          const renderCategory = () => {
+            if (currentCategoryIndex === 0) {
+              return <SettingsGeneral />;
+            }
 
-          <Button
-            style={{ alignSelf: "flex-end" }}
-            theme="outline"
-            onClick={handleChooseDownloadsPath}
-          >
-            {t("change")}
-          </Button>
-        </div>
+            if (currentCategoryIndex === 1) {
+              return <SettingsBehavior />;
+            }
 
-        <h3>{t("notifications")}</h3>
+            if (currentCategoryIndex === 2) {
+              return <SettingsDownloadSources />;
+            }
 
-        <CheckboxField
-          label={t("enable_download_notifications")}
-          checked={form.downloadNotificationsEnabled}
-          onChange={() =>
-            updateUserPreferences(
-              "downloadNotificationsEnabled",
-              !form.downloadNotificationsEnabled
-            )
-          }
-        />
+            return <SettingsRealDebrid />;
+          };
 
-        <CheckboxField
-          label={t("enable_repack_list_notifications")}
-          checked={form.repackUpdatesNotificationsEnabled}
-          onChange={() =>
-            updateUserPreferences(
-              "repackUpdatesNotificationsEnabled",
-              !form.repackUpdatesNotificationsEnabled
-            )
-          }
-        />
+          return (
+            <section className={styles.container}>
+              <div className={styles.content}>
+                <section className={styles.settingsCategories}>
+                  {categories.map((category, index) => (
+                    <Button
+                      key={category}
+                      theme={
+                        currentCategoryIndex === index ? "primary" : "outline"
+                      }
+                      onClick={() => setCurrentCategoryIndex(index)}
+                    >
+                      {category}
+                    </Button>
+                  ))}
+                </section>
 
-        <h3>{t("telemetry")}</h3>
-
-        <CheckboxField
-          label={t("telemetry_description")}
-          checked={form.telemetryEnabled}
-          onChange={() =>
-            updateUserPreferences("telemetryEnabled", !form.telemetryEnabled)
-          }
-        />
-      </div>
-    </section>
+                <h2>{categories[currentCategoryIndex]}</h2>
+                {renderCategory()}
+              </div>
+            </section>
+          );
+        }}
+      </SettingsContextConsumer>
+    </SettingsContextProvider>
   );
 }

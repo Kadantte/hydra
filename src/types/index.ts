@@ -1,5 +1,14 @@
+import type { DownloadSourceStatus, Downloader } from "@shared";
+
+export type GameStatus =
+  | "active"
+  | "waiting"
+  | "paused"
+  | "error"
+  | "complete"
+  | "removed";
+
 export type GameShop = "steam" | "epic";
-export type CatalogueCategory = "recently_added" | "trending";
 
 export interface SteamGenre {
   id: string;
@@ -12,6 +21,20 @@ export interface SteamScreenshot {
   path_full: string;
 }
 
+export interface SteamVideoSource {
+  max: string;
+  "480": string;
+}
+
+export interface SteamMovies {
+  id: number;
+  mp4: SteamVideoSource;
+  webm: SteamVideoSource;
+  thumbnail: string;
+  name: string;
+  highlight: boolean;
+}
+
 export interface SteamAppDetails {
   name: string;
   detailed_description: string;
@@ -19,7 +42,8 @@ export interface SteamAppDetails {
   short_description: string;
   publishers: string[];
   genres: SteamGenre[];
-  screenshots: SteamScreenshot[];
+  movies?: SteamMovies[];
+  screenshots?: SteamScreenshot[];
   pc_requirements: {
     minimum: string;
     recommended: string;
@@ -28,7 +52,7 @@ export interface SteamAppDetails {
     minimum: string;
     recommended: string;
   };
-  linux_requirmenets: {
+  linux_requirements: {
     minimum: string;
     recommended: string;
   };
@@ -42,7 +66,6 @@ export interface GameRepack {
   id: number;
   title: string;
   magnet: string;
-  page: number;
   repacker: string;
   fileSize: string | null;
   uploadDate: Date | string | null;
@@ -52,7 +75,6 @@ export interface GameRepack {
 
 export type ShopDetails = SteamAppDetails & {
   objectID: string;
-  repacks: GameRepack[];
 };
 
 export interface TorrentFile {
@@ -70,33 +92,67 @@ export interface CatalogueEntry {
   repacks: GameRepack[];
 }
 
-/* Used by the library */
-export interface Game extends Omit<CatalogueEntry, "cover"> {
-  id: number;
+export interface UserGame {
+  objectID: string;
+  shop: GameShop;
   title: string;
-  iconUrl: string;
-  status: string;
-  folderName: string;
-  downloadPath: string | null;
-  repacks: GameRepack[];
-  repack: GameRepack;
-  progress: number;
-  fileVerificationProgress: number;
-  bytesDownloaded: number;
-  playTimeInMilliseconds: number;
-  executablePath: string | null;
+  iconUrl: string | null;
+  cover: string;
+  playTimeInSeconds: number;
   lastTimePlayed: Date | null;
-  fileSize: number;
+}
+
+export interface DownloadQueue {
+  id: number;
   createdAt: Date;
   updatedAt: Date;
 }
 
-export interface TorrentProgress {
+/* Used by the library */
+export interface Game {
+  id: number;
+  title: string;
+  iconUrl: string;
+  status: GameStatus | null;
+  folderName: string;
+  downloadPath: string | null;
+  repacks: GameRepack[];
+  progress: number;
+  bytesDownloaded: number;
+  playTimeInMilliseconds: number;
+  downloader: Downloader;
+  executablePath: string | null;
+  lastTimePlayed: Date | null;
+  uri: string | null;
+  fileSize: number;
+  objectID: string;
+  shop: GameShop;
+  downloadQueue: DownloadQueue | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export type LibraryGame = Omit<Game, "repacks">;
+
+export interface GameRunning {
+  id: number;
+  title: string;
+  iconUrl: string;
+  objectID: string;
+  shop: GameShop;
+  sessionDurationInMillis: number;
+}
+
+export interface DownloadProgress {
   downloadSpeed: number;
   timeRemaining: number;
   numPeers: number;
   numSeeds: number;
-  game: Omit<Game, "repacks">;
+  isDownloadingMetadata: boolean;
+  isCheckingFiles: boolean;
+  progress: number;
+  gameId: number;
+  game: LibraryGame;
 }
 
 export interface UserPreferences {
@@ -104,11 +160,133 @@ export interface UserPreferences {
   language: string;
   downloadNotificationsEnabled: boolean;
   repackUpdatesNotificationsEnabled: boolean;
-  telemetryEnabled: boolean;
+  realDebridApiToken: string | null;
+  preferQuitInsteadOfHiding: boolean;
+  runAtStartup: boolean;
 }
 
 export interface HowLongToBeatCategory {
   title: string;
   duration: string;
   accuracy: string;
+}
+
+export interface Steam250Game {
+  title: string;
+  objectID: string;
+}
+
+export interface SteamGame {
+  id: number;
+  name: string;
+  clientIcon: string | null;
+}
+
+export type AppUpdaterEvent =
+  | { type: "update-available"; info: { version: string } }
+  | { type: "update-downloaded" };
+
+/* Events */
+export interface StartGameDownloadPayload {
+  repackId: number;
+  objectID: string;
+  title: string;
+  shop: GameShop;
+  downloadPath: string;
+  downloader: Downloader;
+}
+
+export interface RealDebridUnrestrictLink {
+  id: string;
+  filename: string;
+  mimeType: string;
+  filesize: number;
+  link: string;
+  host: string;
+  host_icon: string;
+  chunks: number;
+  crc: number;
+  download: string;
+  streamable: number;
+}
+
+export interface RealDebridAddMagnet {
+  id: string;
+  // URL of the created ressource
+  uri: string;
+}
+
+export interface RealDebridTorrentInfo {
+  id: string;
+  filename: string;
+  original_filename: string;
+  hash: string;
+  bytes: number;
+  original_bytes: number;
+  host: string;
+  split: number;
+  progress: number;
+  status:
+    | "magnet_error"
+    | "magnet_conversion"
+    | "waiting_files_selection"
+    | "queued"
+    | "downloading"
+    | "downloaded"
+    | "error"
+    | "virus"
+    | "compressing"
+    | "uploading"
+    | "dead";
+  added: string;
+  files: {
+    id: number;
+    path: string;
+    bytes: number;
+    selected: number;
+  }[];
+  links: string[];
+  ended: string;
+  speed: number;
+  seeders: number;
+}
+
+export interface RealDebridUser {
+  id: number;
+  username: string;
+  email: string;
+  points: number;
+  locale: string;
+  avatar: string;
+  type: string;
+  premium: number;
+  expiration: string;
+}
+
+export interface UserDetails {
+  id: string;
+  displayName: string;
+  profileImageUrl: string | null;
+}
+
+export interface UserProfile {
+  id: string;
+  displayName: string;
+  username: string;
+  profileImageUrl: string | null;
+  totalPlayTimeInSeconds: number;
+  libraryGames: UserGame[];
+  recentGames: UserGame[];
+}
+
+export interface DownloadSource {
+  id: number;
+  name: string;
+  url: string;
+  repackCount: number;
+  status: DownloadSourceStatus;
+  downloadCount: number;
+  etag: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 }

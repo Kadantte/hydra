@@ -1,31 +1,19 @@
 import { style } from "@vanilla-extract/css";
-import { recipe } from "@vanilla-extract/recipes";
+
 import { SPACING_UNIT, vars } from "../../theme.css";
 
-export const card = recipe({
-  base: {
-    width: "100%",
-    height: "180px",
-    boxShadow: "0px 0px 15px 0px #000000",
-    overflow: "hidden",
-    borderRadius: "4px",
-    transition: "all ease 0.2s",
-    border: `solid 1px ${vars.color.border}`,
-    cursor: "pointer",
-    zIndex: "1",
-    ":active": {
-      opacity: vars.opacity.active,
-    },
-  },
-  variants: {
-    disabled: {
-      true: {
-        pointerEvents: "none",
-        boxShadow: "none",
-        opacity: vars.opacity.disabled,
-        filter: "grayscale(50%)",
-      },
-    },
+export const card = style({
+  width: "100%",
+  height: "180px",
+  boxShadow: "0px 0px 15px 0px #000000",
+  overflow: "hidden",
+  borderRadius: "4px",
+  transition: "all ease 0.2s",
+  border: `solid 1px ${vars.color.border}`,
+  cursor: "pointer",
+  zIndex: "1",
+  ":active": {
+    opacity: vars.opacity.active,
   },
 });
 
@@ -48,7 +36,7 @@ export const cover = style({
   zIndex: "-1",
   transition: "all ease 0.2s",
   selectors: {
-    [`${card({})}:hover &`]: {
+    [`${card}:hover &`]: {
       transform: "scale(1.05)",
     },
   },
@@ -64,7 +52,7 @@ export const content = style({
   transition: "all ease 0.2s",
   transform: "translateY(24px)",
   selectors: {
-    [`${card({})}:hover &`]: {
+    [`${card}:hover &`]: {
       transform: "translateY(0px)",
     },
   },
@@ -82,16 +70,7 @@ export const downloadOptions = style({
   padding: "0",
   gap: `${SPACING_UNIT}px`,
   flexWrap: "wrap",
-});
-
-export const downloadOption = style({
-  color: "#c0c1c7",
-  fontSize: "10px",
-  padding: `${SPACING_UNIT / 2}px ${SPACING_UNIT}px`,
-  border: "solid 1px #c0c1c7",
-  borderRadius: "4px",
-  display: "flex",
-  alignItems: "center",
+  listStyle: "none",
 });
 
 export const specifics = style({
@@ -122,6 +101,6 @@ export const shopIcon = style({
 });
 
 export const noDownloadsLabel = style({
-  color: vars.color.bodyText,
+  color: vars.color.body,
   fontWeight: "bold",
 });

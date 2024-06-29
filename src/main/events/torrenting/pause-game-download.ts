@@ -1,34 +1,24 @@
-import { WindowManager, writePipe } from "@main/services";
-
 import { registerEvent } from "../register-event";
-import { GameStatus } from "../../constants";
-import { gameRepository } from "../../repository";
-import { In } from "typeorm";
+
+import { DownloadManager } from "@main/services";
+import { dataSource } from "@main/data-source";
+import { DownloadQueue, Game } from "@main/entity";
 
 const pauseGameDownload = async (
   _event: Electron.IpcMainInvokeEvent,
   gameId: number
 ) => {
-  await gameRepository
-    .update(
-      {
-        id: gameId,
-        status: In([
-          GameStatus.Downloading,
-          GameStatus.DownloadingMetadata,
-          GameStatus.CheckingFiles,
-        ]),
-      },
-      { status: GameStatus.Paused }
-    )
-    .then((result) => {
-      if (result.affected) {
-        writePipe.write({ action: "pause" });
-        WindowManager.mainWindow?.setProgressBar(-1);
-      }
+  await dataSource.transaction(async (transactionalEntityManager) => {
+    await DownloadManager.pauseDownload();
+
+    await transactionalEntityManager.getRepository(DownloadQueue).delete({
+      game: { id: gameId },
     });
+
+    await transactionalEntityManager
+      .getRepository(Game)
+      .update({ id: gameId }, { status: "paused" });
+  });
 };
 
-registerEvent(pauseGameDownload, {
-  name: "pauseGameDownload",
-});
+registerEvent("pauseGameDownload", pauseGameDownload);

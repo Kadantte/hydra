@@ -1,25 +1,30 @@
-import { getSteamGameIconUrl, writePipe } from "@main/services";
-import { gameRepository, repackRepository } from "@main/repository";
-import { GameStatus } from "@main/constants";
+import {
+  downloadQueueRepository,
+  gameRepository,
+  repackRepository,
+} from "@main/repository";
 
 import { registerEvent } from "../register-event";
 
-import type { GameShop } from "@types";
-import { getImageBase64 } from "@main/helpers";
-import { In } from "typeorm";
+import type { StartGameDownloadPayload } from "@types";
+import { getFileBase64, getSteamAppAsset } from "@main/helpers";
+import { DownloadManager } from "@main/services";
+
+import { Not } from "typeorm";
+import { steamGamesWorker } from "@main/workers";
+import { createGame } from "@main/services/library-sync";
 
 const startGameDownload = async (
   _event: Electron.IpcMainInvokeEvent,
-  repackId: number,
-  objectID: string,
-  title: string,
-  gameShop: GameShop,
-  downloadPath: string
+  payload: StartGameDownloadPayload
 ) => {
+  const { repackId, objectID, title, shop, downloadPath, downloader } = payload;
+
   const [game, repack] = await Promise.all([
     gameRepository.findOne({
       where: {
         objectID,
+        shop,
       },
     }),
     repackRepository.findOne({
@@ -31,21 +36,11 @@ const startGameDownload = async (
 
   if (!repack) return;
 
-  if (game?.status === GameStatus.Downloading) {
-    return;
-  }
-
-  writePipe.write({ action: "pause" });
+  await DownloadManager.pauseDownload();
 
   await gameRepository.update(
-    {
-      status: In([
-        GameStatus.Downloading,
-        GameStatus.DownloadingMetadata,
-        GameStatus.CheckingFiles,
-      ]),
-    },
-    { status: GameStatus.Paused }
+    { status: "active", progress: Not(1) },
+    { status: "paused" }
   );
 
   if (game) {
@@ -54,49 +49,69 @@ const startGameDownload = async (
         id: game.id,
       },
       {
-        status: GameStatus.DownloadingMetadata,
-        downloadPath: downloadPath,
-        repack: { id: repackId },
+        status: "active",
+        progress: 0,
+        bytesDownloaded: 0,
+        downloadPath,
+        downloader,
+        uri: repack.magnet,
         isDeleted: false,
       }
     );
-
-    writePipe.write({
-      action: "start",
-      game_id: game.id,
-      magnet: repack.magnet,
-      save_path: downloadPath,
-    });
-
-    game.status = GameStatus.DownloadingMetadata;
-
-    return game;
   } else {
-    const iconUrl = await getImageBase64(await getSteamGameIconUrl(objectID));
-
-    const createdGame = await gameRepository.save({
-      title,
-      iconUrl,
-      objectID,
-      shop: gameShop,
-      status: GameStatus.DownloadingMetadata,
-      downloadPath: downloadPath,
-      repack: { id: repackId },
+    const steamGame = await steamGamesWorker.run(Number(objectID), {
+      name: "getById",
     });
 
-    writePipe.write({
-      action: "start",
-      game_id: createdGame.id,
-      magnet: repack.magnet,
-      save_path: downloadPath,
-    });
+    const iconUrl = steamGame?.clientIcon
+      ? getSteamAppAsset("icon", objectID, steamGame.clientIcon)
+      : null;
 
-    const { repack: _, ...rest } = createdGame;
+    await gameRepository
+      .insert({
+        title,
+        iconUrl,
+        objectID,
+        downloader,
+        shop,
+        status: "active",
+        downloadPath,
+        uri: repack.magnet,
+      })
+      .then((result) => {
+        if (iconUrl) {
+          getFileBase64(iconUrl).then((base64) =>
+            gameRepository.update({ objectID }, { iconUrl: base64 })
+          );
+        }
 
-    return rest;
+        return result;
+      });
   }
+
+  const updatedGame = await gameRepository.findOne({
+    where: {
+      objectID,
+    },
+  });
+
+  createGame(updatedGame!).then((response) => {
+    const {
+      id: remoteId,
+      playTimeInMilliseconds,
+      lastTimePlayed,
+    } = response.data;
+
+    gameRepository.update(
+      { objectID },
+      { remoteId, playTimeInMilliseconds, lastTimePlayed }
+    );
+  });
+
+  await downloadQueueRepository.delete({ game: { id: updatedGame!.id } });
+  await downloadQueueRepository.insert({ game: { id: updatedGame!.id } });
+
+  await DownloadManager.startDownload(updatedGame!);
 };
 
-registerEvent(startGameDownload, {
-  name: "startGameDownload",
-});
+registerEvent("startGameDownload", startGameDownload);

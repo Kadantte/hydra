@@ -1,4 +1,5 @@
 import { style } from "@vanilla-extract/css";
+
 import { SPACING_UNIT, vars } from "../../theme.css";
 
 export const hero = style({
@@ -6,7 +7,7 @@ export const hero = style({
   height: "280px",
   minHeight: "280px",
   maxHeight: "280px",
-  borderRadius: "8px",
+  borderRadius: "4px",
   color: "#DADBE1",
   overflow: "hidden",
   boxShadow: "0px 0px 15px 0px #000000",
@@ -23,6 +24,7 @@ export const heroMedia = style({
   width: "100%",
   height: "100%",
   transition: "all ease 0.2s",
+  imageRendering: "revert",
   selectors: {
     [`${hero}:hover &`]: {
       transform: "scale(1.02)",
@@ -45,6 +47,7 @@ export const description = style({
   textAlign: "left",
   fontFamily: "'Fira Sans', sans-serif",
   lineHeight: "20px",
+  marginTop: `${SPACING_UNIT * 2}px`,
 });
 
 export const content = style({

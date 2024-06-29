@@ -1,12 +1,24 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, net, protocol } from "electron";
 import { init } from "@sentry/electron/main";
+import updater from "electron-updater";
 import i18n from "i18next";
 import path from "node:path";
+import url from "node:url";
 import { electronApp, optimizer } from "@electron-toolkit/utils";
-import { resolveDatabaseUpdates, WindowManager } from "@main/services";
+import { logger, TorrentDownloader, WindowManager } from "@main/services";
 import { dataSource } from "@main/data-source";
 import * as resources from "@locales";
 import { userPreferencesRepository } from "@main/repository";
+
+const { autoUpdater } = updater;
+
+autoUpdater.setFeedURL({
+  provider: "github",
+  owner: "hydralauncher",
+  repo: "hydra",
+});
+
+autoUpdater.logger = logger;
 
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) app.quit();
@@ -14,16 +26,10 @@ if (!gotTheLock) app.quit();
 if (import.meta.env.MAIN_VITE_SENTRY_DSN) {
   init({
     dsn: import.meta.env.MAIN_VITE_SENTRY_DSN,
-    beforeSend: async (event) => {
-      const userPreferences = await userPreferencesRepository.findOne({
-        where: { id: 1 },
-      });
-
-      if (userPreferences?.telemetryEnabled) return event;
-      return null;
-    },
   });
 }
+
+app.commandLine.appendSwitch("--no-sandbox");
 
 i18n.init({
   resources,
@@ -49,26 +55,39 @@ if (process.defaultApp) {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   electronApp.setAppUserModelId("site.hydralauncher.hydra");
 
-  dataSource.initialize().then(async () => {
-    await resolveDatabaseUpdates();
-
-    await import("./main");
-
-    const userPreferences = await userPreferencesRepository.findOne({
-      where: { id: 1 },
-    });
-
-    WindowManager.createMainWindow();
-    WindowManager.createSystemTray(userPreferences?.language || "en");
+  protocol.handle("local", (request) => {
+    const filePath = request.url.slice("local:".length);
+    return net.fetch(url.pathToFileURL(decodeURI(filePath)).toString());
   });
+
+  await dataSource.initialize();
+  await dataSource.runMigrations();
+
+  await import("./main");
+
+  const userPreferences = await userPreferencesRepository.findOne({
+    where: { id: 1 },
+  });
+
+  WindowManager.createMainWindow();
+  WindowManager.createSystemTray(userPreferences?.language || "en");
 });
 
 app.on("browser-window-created", (_, window) => {
   optimizer.watchWindowShortcuts(window);
 });
+
+const handleDeepLinkPath = (uri?: string) => {
+  if (!uri) return;
+  const url = new URL(uri);
+
+  if (url.host === "install-source") {
+    WindowManager.redirect(`settings${url.search}`);
+  }
+};
 
 app.on("second-instance", (_event, commandLine) => {
   // Someone tried to run a second instance, we should focus our window.
@@ -81,13 +100,11 @@ app.on("second-instance", (_event, commandLine) => {
     WindowManager.createMainWindow();
   }
 
-  const [, path] = commandLine.pop().split("://");
-  if (path) WindowManager.redirect(path);
+  handleDeepLinkPath(commandLine.pop());
 });
 
 app.on("open-url", (_event, url) => {
-  const [, path] = url.split("://");
-  WindowManager.redirect(path);
+  handleDeepLinkPath(url);
 });
 
 // Quit when all windows are closed, except on macOS. There, it's common
@@ -95,6 +112,11 @@ app.on("open-url", (_event, url) => {
 // explicitly with Cmd + Q.
 app.on("window-all-closed", () => {
   WindowManager.mainWindow = null;
+});
+
+app.on("before-quit", () => {
+  /* Disconnects libtorrent */
+  TorrentDownloader.kill();
 });
 
 app.on("activate", () => {

@@ -1,9 +1,12 @@
 import Skeleton from "react-loading-skeleton";
 
 import { Button } from "@renderer/components";
+
 import * as styles from "./game-details.css";
+import * as sidebarStyles from "./sidebar/sidebar.css";
+import * as descriptionHeaderStyles from "./description-header/description-header.css";
+
 import { useTranslation } from "react-i18next";
-import { ShareAndroidIcon } from "@primer/octicons-react";
 
 export function GameDetailsSkeleton() {
   const { t } = useTranslation("game_details");
@@ -13,23 +16,19 @@ export function GameDetailsSkeleton() {
       <div className={styles.hero}>
         <Skeleton className={styles.heroImageSkeleton} />
       </div>
-      <div className={styles.descriptionHeader}>
-        <section className={styles.descriptionHeaderInfo}>
+      <div className={styles.heroPanelSkeleton}>
+        <section className={descriptionHeaderStyles.descriptionHeaderInfo}>
           <Skeleton width={155} />
           <Skeleton width={135} />
         </section>
       </div>
       <div className={styles.descriptionContainer}>
         <div className={styles.descriptionContent}>
-          <div className={styles.descriptionHeader}>
-            <section className={styles.descriptionHeaderInfo}>
+          <div className={descriptionHeaderStyles.descriptionHeader}>
+            <section className={descriptionHeaderStyles.descriptionHeaderInfo}>
               <Skeleton width={145} />
               <Skeleton width={150} />
             </section>
-            <Button theme="outline" disabled>
-              <ShareAndroidIcon />
-              {t("copy_link_to_clipboard")}
-            </Button>
           </div>
           <div className={styles.descriptionSkeleton}>
             {Array.from({ length: 3 }).map((_, index) => (
@@ -43,41 +42,41 @@ export function GameDetailsSkeleton() {
             <Skeleton />
           </div>
         </div>
-        <div className={styles.contentSidebar}>
-          <div className={styles.contentSidebarTitle}>
+        <div className={sidebarStyles.contentSidebar}>
+          <div className={sidebarStyles.contentSidebarTitle}>
             <h3>HowLongToBeat</h3>
           </div>
-          <ul className={styles.howLongToBeatCategoriesList}>
+          <ul className={sidebarStyles.howLongToBeatCategoriesList}>
             {Array.from({ length: 3 }).map((_, index) => (
               <Skeleton
                 key={index}
-                className={styles.howLongToBeatCategorySkeleton}
+                className={sidebarStyles.howLongToBeatCategorySkeleton}
               />
             ))}
           </ul>
           <div
-            className={styles.contentSidebarTitle}
+            className={sidebarStyles.contentSidebarTitle}
             style={{ border: "none" }}
           >
             <h3>{t("requirements")}</h3>
           </div>
-          <div className={styles.requirementButtonContainer}>
+          <div className={sidebarStyles.requirementButtonContainer}>
             <Button
-              className={styles.requirementButton}
+              className={sidebarStyles.requirementButton}
               theme="primary"
               disabled
             >
               {t("minimum")}
             </Button>
             <Button
-              className={styles.requirementButton}
+              className={sidebarStyles.requirementButton}
               theme="outline"
               disabled
             >
               {t("recommended")}
             </Button>
           </div>
-          <div className={styles.requirementsDetailsSkeleton}>
+          <div className={sidebarStyles.requirementsDetailsSkeleton}>
             {Array.from({ length: 6 }).map((_, index) => (
               <Skeleton key={index} height={20} />
             ))}

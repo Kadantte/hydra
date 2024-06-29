@@ -4,16 +4,18 @@ import Skeleton, { SkeletonTheme } from "react-loading-skeleton";
 import type { CatalogueEntry } from "@types";
 
 import type { DebouncedFunc } from "lodash";
-import { debounce } from "lodash-es";
+import { debounce } from "lodash";
 
 import { InboxIcon } from "@primer/octicons-react";
 import { clearSearch } from "@renderer/features";
 import { useAppDispatch } from "@renderer/hooks";
-import { vars } from "../../theme.css";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import * as styles from "./home.css";
+import { buildGameDetailsPath } from "@renderer/helpers";
+
+import { vars } from "@renderer/theme.css";
 
 export function SearchResults() {
   const dispatch = useAppDispatch();
@@ -30,7 +32,7 @@ export function SearchResults() {
 
   const handleGameClick = (game: CatalogueEntry) => {
     dispatch(clearSearch());
-    navigate(`/game/${game.shop}/${game.objectID}`);
+    navigate(buildGameDetailsPath(game));
   };
 
   useEffect(() => {

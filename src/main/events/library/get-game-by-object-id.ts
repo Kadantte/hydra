@@ -11,11 +11,6 @@ const getGameByObjectID = async (
       objectID,
       isDeleted: false,
     },
-    relations: {
-      repack: true,
-    },
   });
 
-registerEvent(getGameByObjectID, {
-  name: "getGameByObjectID",
-});
+registerEvent("getGameByObjectID", getGameByObjectID);

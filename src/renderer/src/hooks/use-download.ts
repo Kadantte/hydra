@@ -4,77 +4,74 @@ import { formatDownloadProgress } from "@renderer/helpers";
 import { useLibrary } from "./use-library";
 import { useAppDispatch, useAppSelector } from "./redux";
 import {
-  addPacket,
+  setLastPacket,
   clearDownload,
   setGameDeleting,
   removeGameFromDeleting,
 } from "@renderer/features";
-import type { GameShop, TorrentProgress } from "@types";
+import type { DownloadProgress, StartGameDownloadPayload } from "@types";
 import { useDate } from "./use-date";
-import { formatBytes } from "@renderer/utils";
+import { formatBytes } from "@shared";
 
 export function useDownload() {
   const { updateLibrary } = useLibrary();
   const { formatDistance } = useDate();
 
-  const { packets, gamesWithDeletionInProgress } = useAppSelector(
+  const { lastPacket, gamesWithDeletionInProgress } = useAppSelector(
     (state) => state.download
   );
   const dispatch = useAppDispatch();
 
-  const lastPacket = packets.at(-1);
-
-  const startDownload = (
-    repackId: number,
-    objectID: string,
-    title: string,
-    shop: GameShop,
-    downloadPath: string
-  ) =>
-    window.electron
-      .startGameDownload(repackId, objectID, title, shop, downloadPath)
-      .then((game) => {
-        dispatch(clearDownload());
-        updateLibrary();
-
-        return game;
-      });
-
-  const pauseDownload = (gameId: number) =>
-    window.electron.pauseGameDownload(gameId).then(() => {
-      dispatch(clearDownload());
+  const startDownload = (payload: StartGameDownloadPayload) => {
+    dispatch(clearDownload());
+    window.electron.startGameDownload(payload).then((game) => {
       updateLibrary();
-    });
 
-  const resumeDownload = (gameId: number) =>
-    window.electron.resumeGameDownload(gameId).then(() => {
-      updateLibrary();
+      return game;
     });
+  };
 
-  const cancelDownload = (gameId: number) =>
-    window.electron.cancelGameDownload(gameId).then(() => {
-      dispatch(clearDownload());
+  const pauseDownload = async (gameId: number) => {
+    await window.electron.pauseGameDownload(gameId);
+    await updateLibrary();
+    dispatch(clearDownload());
+  };
+
+  const resumeDownload = async (gameId: number) => {
+    await window.electron.resumeGameDownload(gameId);
+    return updateLibrary();
+  };
+
+  const removeGameInstaller = async (gameId: number) => {
+    dispatch(setGameDeleting(gameId));
+
+    try {
+      await window.electron.deleteGameFolder(gameId);
       updateLibrary();
-      deleteGame(gameId);
-    });
+    } finally {
+      dispatch(removeGameFromDeleting(gameId));
+    }
+  };
+
+  const cancelDownload = async (gameId: number) => {
+    await window.electron.cancelGameDownload(gameId);
+    dispatch(clearDownload());
+    updateLibrary();
+
+    removeGameInstaller(gameId);
+  };
 
   const removeGameFromLibrary = (gameId: number) =>
     window.electron.removeGameFromLibrary(gameId).then(() => {
       updateLibrary();
     });
 
-  const isVerifying = ["downloading_metadata", "checking_files"].includes(
-    lastPacket?.game.status ?? ""
-  );
-
-  const getETA = () => {
-    if (isVerifying || !isFinite(lastPacket?.timeRemaining ?? 0)) {
-      return "";
-    }
+  const calculateETA = () => {
+    if (!lastPacket || lastPacket.timeRemaining < 0) return "";
 
     try {
       return formatDistance(
-        addMilliseconds(new Date(), lastPacket?.timeRemaining ?? 1),
+        addMilliseconds(new Date(), lastPacket.timeRemaining),
         new Date(),
         { addSuffix: true }
       );
@@ -83,51 +80,24 @@ export function useDownload() {
     }
   };
 
-  const getProgress = () => {
-    if (lastPacket?.game.status === "checking_files") {
-      return formatDownloadProgress(lastPacket?.game.fileVerificationProgress);
-    }
-
-    return formatDownloadProgress(lastPacket?.game.progress);
-  };
-
-  const deleteGame = (gameId: number) =>
-    window.electron
-      .cancelGameDownload(gameId)
-      .then(() => {
-        dispatch(setGameDeleting(gameId));
-        return window.electron.deleteGameFolder(gameId);
-      })
-      .catch(() => {})
-      .finally(() => {
-        updateLibrary();
-        dispatch(removeGameFromDeleting(gameId));
-      });
-
   const isGameDeleting = (gameId: number) => {
     return gamesWithDeletionInProgress.includes(gameId);
   };
 
   return {
-    game: lastPacket?.game,
-    bytesDownloaded: lastPacket?.game.bytesDownloaded,
-    fileSize: lastPacket?.game.fileSize,
-    isVerifying,
-    gameId: lastPacket?.game.id,
     downloadSpeed: `${formatBytes(lastPacket?.downloadSpeed ?? 0)}/s`,
-    isDownloading: Boolean(lastPacket),
-    progress: getProgress(),
-    numPeers: lastPacket?.numPeers,
-    numSeeds: lastPacket?.numSeeds,
-    eta: getETA(),
+    progress: formatDownloadProgress(lastPacket?.progress ?? 0),
+    lastPacket,
+    eta: calculateETA(),
     startDownload,
     pauseDownload,
     resumeDownload,
     cancelDownload,
     removeGameFromLibrary,
-    deleteGame,
+    removeGameInstaller,
     isGameDeleting,
     clearDownload: () => dispatch(clearDownload()),
-    addPacket: (packet: TorrentProgress) => dispatch(addPacket(packet)),
+    setLastPacket: (packet: DownloadProgress) =>
+      dispatch(setLastPacket(packet)),
   };
 }

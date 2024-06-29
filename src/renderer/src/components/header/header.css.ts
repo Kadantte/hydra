@@ -108,7 +108,7 @@ export const section = style({
 
 export const backButton = recipe({
   base: {
-    color: vars.color.bodyText,
+    color: vars.color.body,
     cursor: "pointer",
     WebkitAppRegion: "no-drag",
     position: "absolute",
@@ -144,4 +144,30 @@ export const title = recipe({
       },
     },
   },
+});
+
+export const subheader = style({
+  borderBottom: `solid 1px ${vars.color.border}`,
+  padding: `${SPACING_UNIT / 2}px ${SPACING_UNIT * 3}px`,
+});
+
+export const newVersionButton = style({
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: `${SPACING_UNIT}px`,
+  color: vars.color.body,
+  fontSize: "13px",
+  ":hover": {
+    textDecoration: "underline",
+    cursor: "pointer",
+  },
+});
+
+export const newVersionLink = style({
+  display: "flex",
+  alignItems: "center",
+  gap: `${SPACING_UNIT}px`,
+  color: "#8e919b",
+  fontSize: "13px",
 });

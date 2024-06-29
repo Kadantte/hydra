@@ -6,11 +6,13 @@ import type { CatalogueEntry } from "@types";
 
 import { clearSearch } from "@renderer/features";
 import { useAppDispatch } from "@renderer/hooks";
-import { SPACING_UNIT, vars } from "../../theme.css";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import * as styles from "../home/home.css";
 import { ArrowLeftIcon, ArrowRightIcon } from "@primer/octicons-react";
+import { buildGameDetailsPath } from "@renderer/helpers";
+
+import { SPACING_UNIT, vars } from "@renderer/theme.css";
 
 export function Catalogue() {
   const dispatch = useAppDispatch();
@@ -31,7 +33,7 @@ export function Catalogue() {
 
   const handleGameClick = (game: CatalogueEntry) => {
     dispatch(clearSearch());
-    navigate(`/game/${game.shop}/${game.objectID}`);
+    navigate(buildGameDetailsPath(game));
   };
 
   useEffect(() => {

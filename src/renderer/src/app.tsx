@@ -1,37 +1,45 @@
 import { useCallback, useEffect, useRef } from "react";
 
-import { Sidebar, BottomPanel, Header } from "@renderer/components";
+import { Sidebar, BottomPanel, Header, Toast } from "@renderer/components";
 
 import {
   useAppDispatch,
   useAppSelector,
   useDownload,
   useLibrary,
+  useToast,
+  useUserDetails,
 } from "@renderer/hooks";
 
 import * as styles from "./app.css";
-import { themeClass } from "./theme.css";
 
-import { useLocation, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   setSearch,
   clearSearch,
   setUserPreferences,
-  setRepackersFriendlyNames,
   toggleDraggingDisabled,
+  closeToast,
+  setUserDetails,
+  setProfileBackground,
+  setGameRunning,
 } from "@renderer/features";
-
-document.body.classList.add(themeClass);
+import { useTranslation } from "react-i18next";
 
 export interface AppProps {
   children: React.ReactNode;
 }
 
-export function App({ children }: AppProps) {
+export function App() {
   const contentRef = useRef<HTMLDivElement>(null);
-  const { updateLibrary } = useLibrary();
+  const { updateLibrary, library } = useLibrary();
 
-  const { clearDownload, addPacket } = useDownload();
+  const { t } = useTranslation("app");
+
+  const { clearDownload, setLastPacket } = useDownload();
+
+  const { fetchUserDetails, updateUserDetails, clearUserDetails } =
+    useUserDetails();
 
   const dispatch = useAppDispatch();
 
@@ -39,19 +47,21 @@ export function App({ children }: AppProps) {
   const location = useLocation();
 
   const search = useAppSelector((state) => state.search.value);
+
   const draggingDisabled = useAppSelector(
     (state) => state.window.draggingDisabled
   );
 
+  const toast = useAppSelector((state) => state.toast);
+
+  const { showSuccessToast } = useToast();
+
   useEffect(() => {
-    Promise.all([
-      window.electron.getUserPreferences(),
-      window.electron.getRepackersFriendlyNames(),
-      updateLibrary(),
-    ]).then(([preferences, repackersFriendlyNames]) => {
-      dispatch(setUserPreferences(preferences));
-      dispatch(setRepackersFriendlyNames(repackersFriendlyNames));
-    });
+    Promise.all([window.electron.getUserPreferences(), updateLibrary()]).then(
+      ([preferences]) => {
+        dispatch(setUserPreferences(preferences));
+      }
+    );
   }, [navigate, location.pathname, dispatch, updateLibrary]);
 
   useEffect(() => {
@@ -63,14 +73,83 @@ export function App({ children }: AppProps) {
           return;
         }
 
-        addPacket(downloadProgress);
+        setLastPacket(downloadProgress);
       }
     );
 
     return () => {
       unsubscribe();
     };
-  }, [clearDownload, addPacket, updateLibrary]);
+  }, [clearDownload, setLastPacket, updateLibrary]);
+
+  useEffect(() => {
+    const cachedUserDetails = window.localStorage.getItem("userDetails");
+
+    if (cachedUserDetails) {
+      const { profileBackground, ...userDetails } =
+        JSON.parse(cachedUserDetails);
+
+      dispatch(setUserDetails(userDetails));
+      dispatch(setProfileBackground(profileBackground));
+    }
+
+    window.electron.isUserLoggedIn().then((isLoggedIn) => {
+      if (isLoggedIn) {
+        fetchUserDetails().then((response) => {
+          if (response) updateUserDetails(response);
+        });
+      }
+    });
+  }, [fetchUserDetails, updateUserDetails, dispatch]);
+
+  const onSignIn = useCallback(() => {
+    fetchUserDetails().then((response) => {
+      if (response) {
+        updateUserDetails(response);
+        showSuccessToast(t("successfully_signed_in"));
+      }
+    });
+  }, [fetchUserDetails, t, showSuccessToast, updateUserDetails]);
+
+  useEffect(() => {
+    const unsubscribe = window.electron.onGamesRunning((gamesRunning) => {
+      if (gamesRunning.length) {
+        const lastGame = gamesRunning[gamesRunning.length - 1];
+        const libraryGame = library.find(
+          (library) => library.id === lastGame.id
+        );
+
+        if (libraryGame) {
+          dispatch(
+            setGameRunning({
+              ...libraryGame,
+              sessionDurationInMillis: lastGame.sessionDurationInMillis,
+            })
+          );
+          return;
+        }
+      }
+      dispatch(setGameRunning(null));
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [dispatch, library]);
+
+  useEffect(() => {
+    const listeners = [
+      window.electron.onSignIn(onSignIn),
+      window.electron.onLibraryBatchComplete(() => {
+        updateLibrary();
+      }),
+      window.electron.onSignOut(() => clearUserDetails()),
+    ];
+
+    return () => {
+      listeners.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [onSignIn, updateLibrary, clearUserDetails]);
 
   const handleSearch = useCallback(
     (query: string) => {
@@ -112,6 +191,10 @@ export function App({ children }: AppProps) {
     });
   }, [dispatch, draggingDisabled]);
 
+  const handleToastClose = useCallback(() => {
+    dispatch(closeToast());
+  }, [dispatch]);
+
   return (
     <>
       {window.electron.platform === "win32" && (
@@ -119,6 +202,13 @@ export function App({ children }: AppProps) {
           <h4>Hydra</h4>
         </div>
       )}
+
+      <Toast
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        onClose={handleToastClose}
+      />
 
       <main>
         <Sidebar />
@@ -131,10 +221,11 @@ export function App({ children }: AppProps) {
           />
 
           <section ref={contentRef} className={styles.content}>
-            {children}
+            <Outlet />
           </section>
         </article>
       </main>
+
       <BottomPanel />
     </>
   );

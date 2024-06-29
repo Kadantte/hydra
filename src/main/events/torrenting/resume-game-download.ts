@@ -1,9 +1,11 @@
+import { Not } from "typeorm";
+
 import { registerEvent } from "../register-event";
-import { GameStatus } from "../../constants";
 import { gameRepository } from "../../repository";
-import { getDownloadsPath } from "../helpers/get-downloads-path";
-import { In } from "typeorm";
-import { writePipe } from "@main/services";
+
+import { DownloadManager } from "@main/services";
+import { dataSource } from "@main/data-source";
+import { DownloadQueue, Game } from "@main/entity";
 
 const resumeGameDownload = async (
   _event: Electron.IpcMainInvokeEvent,
@@ -12,45 +14,35 @@ const resumeGameDownload = async (
   const game = await gameRepository.findOne({
     where: {
       id: gameId,
+      isDeleted: false,
     },
-    relations: { repack: true },
   });
 
   if (!game) return;
 
-  writePipe.write({ action: "pause" });
+  if (game.status === "paused") {
+    await dataSource.transaction(async (transactionalEntityManager) => {
+      await DownloadManager.pauseDownload();
 
-  if (game.status === GameStatus.Paused) {
-    const downloadsPath = game.downloadPath ?? (await getDownloadsPath());
+      await transactionalEntityManager
+        .getRepository(Game)
+        .update({ status: "active", progress: Not(1) }, { status: "paused" });
 
-    writePipe.write({
-      action: "start",
-      game_id: gameId,
-      magnet: game.repack.magnet,
-      save_path: downloadsPath,
+      await DownloadManager.resumeDownload(game);
+
+      await transactionalEntityManager
+        .getRepository(DownloadQueue)
+        .delete({ game: { id: gameId } });
+
+      await transactionalEntityManager
+        .getRepository(DownloadQueue)
+        .insert({ game: { id: gameId } });
+
+      await transactionalEntityManager
+        .getRepository(Game)
+        .update({ id: gameId }, { status: "active" });
     });
-
-    await gameRepository.update(
-      {
-        status: In([
-          GameStatus.Downloading,
-          GameStatus.DownloadingMetadata,
-          GameStatus.CheckingFiles,
-        ]),
-      },
-      { status: GameStatus.Paused }
-    );
-
-    await gameRepository.update(
-      { id: game.id },
-      {
-        status: GameStatus.DownloadingMetadata,
-        downloadPath: downloadsPath,
-      }
-    );
   }
 };
 
-registerEvent(resumeGameDownload, {
-  name: "resumeGameDownload",
-});
+registerEvent("resumeGameDownload", resumeGameDownload);

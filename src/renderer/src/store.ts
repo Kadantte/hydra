@@ -3,19 +3,23 @@ import {
   downloadSlice,
   windowSlice,
   librarySlice,
-  repackersFriendlyNamesSlice,
   searchSlice,
   userPreferencesSlice,
+  toastSlice,
+  userDetailsSlice,
+  gameRunningSlice,
 } from "@renderer/features";
 
 export const store = configureStore({
   reducer: {
     search: searchSlice.reducer,
-    repackersFriendlyNames: repackersFriendlyNamesSlice.reducer,
     window: windowSlice.reducer,
     library: librarySlice.reducer,
     userPreferences: userPreferencesSlice.reducer,
     download: downloadSlice.reducer,
+    toast: toastSlice.reducer,
+    userDetails: userDetailsSlice.reducer,
+    gameRunning: gameRunningSlice.reducer,
   },
 });
 

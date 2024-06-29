@@ -12,7 +12,9 @@ export interface ModalProps {
   title: string;
   description?: string;
   onClose: () => void;
+  large?: boolean;
   children: React.ReactNode;
+  clickOutsideToClose?: boolean;
 }
 
 export function Modal({
@@ -20,7 +22,9 @@ export function Modal({
   title,
   description,
   onClose,
+  large,
   children,
+  clickOutsideToClose = true,
 }: ModalProps) {
   const [isClosing, setIsClosing] = useState(false);
   const modalContentRef = useRef<HTMLDivElement | null>(null);
@@ -42,7 +46,7 @@ export function Modal({
   }, [onClose]);
 
   const isTopMostModal = () => {
-    const openModals = document.querySelectorAll("[role=modal]");
+    const openModals = document.querySelectorAll("[role=dialog]");
 
     return (
       openModals.length &&
@@ -58,6 +62,18 @@ export function Modal({
         }
       };
 
+      window.addEventListener("keydown", onKeyDown);
+
+      return () => {
+        window.removeEventListener("keydown", onKeyDown);
+      };
+    }
+
+    return () => {};
+  }, [handleCloseClick, visible]);
+
+  useEffect(() => {
+    if (clickOutsideToClose) {
       const onMouseDown = (e: MouseEvent) => {
         if (!isTopMostModal()) return;
         if (modalContentRef.current) {
@@ -71,25 +87,25 @@ export function Modal({
         }
       };
 
-      window.addEventListener("keydown", onKeyDown);
       window.addEventListener("mousedown", onMouseDown);
 
       return () => {
-        window.removeEventListener("keydown", onKeyDown);
         window.removeEventListener("mousedown", onMouseDown);
       };
     }
 
     return () => {};
-  }, [handleCloseClick, visible]);
+  }, [clickOutsideToClose, handleCloseClick]);
 
   if (!visible) return null;
 
   return createPortal(
     <Backdrop isClosing={isClosing}>
       <div
-        className={styles.modal({ closing: isClosing })}
-        role="modal"
+        className={styles.modal({ closing: isClosing, large })}
+        role="dialog"
+        aria-labelledby={title}
+        aria-describedby={description}
         ref={modalContentRef}
       >
         <div className={styles.modalHeader}>

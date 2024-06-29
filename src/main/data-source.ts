@@ -1,35 +1,37 @@
 import { DataSource } from "typeorm";
 import {
+  DownloadQueue,
+  DownloadSource,
   Game,
   GameShopCache,
-  ImageCache,
   Repack,
-  RepackerFriendlyName,
   UserPreferences,
-  MigrationScript,
-  SteamGame,
 } from "@main/entity";
-import type { SqliteConnectionOptions } from "typeorm/driver/sqlite/SqliteConnectionOptions";
+import type { BetterSqlite3ConnectionOptions } from "typeorm/driver/better-sqlite3/BetterSqlite3ConnectionOptions";
 
 import { databasePath } from "./constants";
+import migrations from "./migrations";
+import { UserAuth } from "./entity/user-auth";
 
-export const createDataSource = (options: Partial<SqliteConnectionOptions>) =>
+export const createDataSource = (
+  options: Partial<BetterSqlite3ConnectionOptions>
+) =>
   new DataSource({
     type: "better-sqlite3",
-    database: databasePath,
     entities: [
       Game,
-      ImageCache,
       Repack,
-      RepackerFriendlyName,
       UserPreferences,
       GameShopCache,
-      MigrationScript,
-      SteamGame,
+      DownloadSource,
+      DownloadQueue,
+      UserAuth,
     ],
+    synchronize: true,
+    database: databasePath,
     ...options,
   });
 
 export const dataSource = createDataSource({
-  synchronize: true,
+  migrations,
 });

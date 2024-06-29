@@ -18,7 +18,7 @@ const base = style({
   },
   ":disabled": {
     opacity: vars.opacity.disabled,
-    pointerEvents: "none",
+    cursor: "not-allowed",
   },
 });
 
@@ -28,6 +28,9 @@ export const button = styleVariants({
     {
       ":hover": {
         backgroundColor: "#DADBE1",
+      },
+      ":disabled": {
+        backgroundColor: vars.color.muted,
       },
     },
   ],
@@ -40,6 +43,9 @@ export const button = styleVariants({
       ":hover": {
         backgroundColor: "rgba(255, 255, 255, 0.1)",
       },
+      ":disabled": {
+        backgroundColor: "transparent",
+      },
     },
   ],
   dark: [
@@ -47,6 +53,17 @@ export const button = styleVariants({
     {
       backgroundColor: vars.color.darkBackground,
       color: "#c0c1c7",
+    },
+  ],
+  danger: [
+    base,
+    {
+      border: `solid 1px #a31533`,
+      backgroundColor: "transparent",
+      color: "white",
+      ":hover": {
+        backgroundColor: "#a31533",
+      },
     },
   ],
 });

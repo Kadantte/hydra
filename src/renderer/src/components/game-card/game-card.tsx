@@ -2,13 +2,10 @@ import { DownloadIcon, FileDirectoryIcon } from "@primer/octicons-react";
 import type { CatalogueEntry } from "@types";
 
 import SteamLogo from "@renderer/assets/steam-logo.svg?react";
-import EpicGamesLogo from "@renderer/assets/epic-games-logo.svg?react";
-
-import { AsyncImage } from "../async-image/async-image";
 
 import * as styles from "./game-card.css";
-import { useAppSelector } from "@renderer/hooks";
 import { useTranslation } from "react-i18next";
+import { Badge } from "../badge/badge";
 
 export interface GameCardProps
   extends React.DetailedHTMLProps<
@@ -16,38 +13,23 @@ export interface GameCardProps
     HTMLButtonElement
   > {
   game: CatalogueEntry;
-  disabled?: boolean;
 }
 
 const shopIcon = {
-  epic: <EpicGamesLogo className={styles.shopIcon} />,
   steam: <SteamLogo className={styles.shopIcon} />,
 };
 
-export function GameCard({ game, disabled, ...props }: GameCardProps) {
+export function GameCard({ game, ...props }: GameCardProps) {
   const { t } = useTranslation("game_card");
-
-  const repackersFriendlyNames = useAppSelector(
-    (state) => state.repackersFriendlyNames.value
-  );
 
   const uniqueRepackers = Array.from(
     new Set(game.repacks.map(({ repacker }) => repacker))
   );
 
   return (
-    <button
-      {...props}
-      type="button"
-      className={styles.card({ disabled })}
-      disabled={disabled}
-    >
+    <button {...props} type="button" className={styles.card}>
       <div className={styles.backdrop}>
-        <AsyncImage
-          src={game.cover}
-          alt={game.title}
-          className={styles.cover}
-        />
+        <img src={game.cover} alt={game.title} className={styles.cover} />
 
         <div className={styles.content}>
           <div className={styles.titleContainer}>
@@ -58,8 +40,8 @@ export function GameCard({ game, disabled, ...props }: GameCardProps) {
           {uniqueRepackers.length > 0 ? (
             <ul className={styles.downloadOptions}>
               {uniqueRepackers.map((repacker) => (
-                <li key={repacker} className={styles.downloadOption}>
-                  <span>{repackersFriendlyNames[repacker]}</span>
+                <li key={repacker}>
+                  <Badge>{repacker}</Badge>
                 </li>
               ))}
             </ul>

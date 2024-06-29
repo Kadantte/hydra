@@ -3,46 +3,69 @@ import { gameRepository } from "@main/repository";
 import { registerEvent } from "../register-event";
 
 import type { GameShop } from "@types";
-import { getImageBase64 } from "@main/helpers";
-import { getSteamGameIconUrl } from "@main/services";
+import { getFileBase64, getSteamAppAsset } from "@main/helpers";
+
+import { steamGamesWorker } from "@main/workers";
+import { createGame } from "@main/services/library-sync";
 
 const addGameToLibrary = async (
   _event: Electron.IpcMainInvokeEvent,
   objectID: string,
   title: string,
-  gameShop: GameShop,
-  executablePath: string
+  shop: GameShop
 ) => {
-  const game = await gameRepository.findOne({
-    where: {
-      objectID,
-    },
-  });
-
-  if (game) {
-    return gameRepository.update(
+  return gameRepository
+    .update(
       {
-        id: game.id,
+        objectID,
       },
       {
-        shop: gameShop,
-        executablePath,
+        shop,
+        status: null,
         isDeleted: false,
       }
-    );
-  } else {
-    const iconUrl = await getImageBase64(await getSteamGameIconUrl(objectID));
+    )
+    .then(async ({ affected }) => {
+      if (!affected) {
+        const steamGame = await steamGamesWorker.run(Number(objectID), {
+          name: "getById",
+        });
 
-    return gameRepository.insert({
-      title,
-      iconUrl,
-      objectID,
-      shop: gameShop,
-      executablePath,
+        const iconUrl = steamGame?.clientIcon
+          ? getSteamAppAsset("icon", objectID, steamGame.clientIcon)
+          : null;
+
+        await gameRepository
+          .insert({
+            title,
+            iconUrl,
+            objectID,
+            shop,
+          })
+          .then(() => {
+            if (iconUrl) {
+              getFileBase64(iconUrl).then((base64) =>
+                gameRepository.update({ objectID }, { iconUrl: base64 })
+              );
+            }
+          });
+      }
+
+      const game = await gameRepository.findOne({ where: { objectID } });
+
+      createGame(game!).then((response) => {
+        const {
+          id: remoteId,
+          playTimeInMilliseconds,
+          lastTimePlayed,
+        } = response.data;
+
+        gameRepository.update(
+          { objectID },
+          { remoteId, playTimeInMilliseconds, lastTimePlayed }
+        );
+      });
     });
-  }
 };
 
-registerEvent(addGameToLibrary, {
-  name: "addGameToLibrary",
-});
+registerEvent("addGameToLibrary", addGameToLibrary);

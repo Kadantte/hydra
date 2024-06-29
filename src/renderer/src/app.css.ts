@@ -7,6 +7,7 @@ globalStyle("*", {
 
 globalStyle("::-webkit-scrollbar", {
   width: "9px",
+  backgroundColor: vars.color.darkBackground,
 });
 
 globalStyle("::-webkit-scrollbar-track", {
@@ -26,9 +27,9 @@ globalStyle("body", {
   overflow: "hidden",
   userSelect: "none",
   fontFamily: "'Fira Mono', monospace",
-  fontSize: vars.size.bodyFontSize,
+  fontSize: vars.size.body,
   background: vars.color.background,
-  color: vars.color.bodyText,
+  color: vars.color.body,
   margin: "0",
 });
 
@@ -68,7 +69,7 @@ globalStyle(
 );
 
 globalStyle("label", {
-  fontSize: vars.size.bodyFontSize,
+  fontSize: vars.size.body,
 });
 
 globalStyle("input[type=number]", {
@@ -78,6 +79,10 @@ globalStyle("input[type=number]", {
 globalStyle("img", {
   WebkitUserDrag: "none",
 } as Record<string, string>);
+
+globalStyle("progress[value]", {
+  WebkitAppearance: "none",
+});
 
 export const container = style({
   width: "100%",
@@ -106,6 +111,6 @@ export const titleBar = style({
   alignItems: "center",
   padding: `0 ${SPACING_UNIT * 2}px`,
   WebkitAppRegion: "drag",
-  zIndex: "2",
+  zIndex: "4",
   borderBottom: `1px solid ${vars.color.border}`,
 } as ComplexStyleRule);

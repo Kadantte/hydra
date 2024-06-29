@@ -1,103 +1,61 @@
-import libtorrent as lt
 import sys
-from fifo import Fifo
+from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
-import threading
-import time
+import urllib.parse
+from downloader import Downloader
 
 torrent_port = sys.argv[1]
-read_sock_path = sys.argv[2]
-write_sock_path = sys.argv[3]
+http_port = sys.argv[2]
+rpc_password = sys.argv[3]
+initial_download = json.loads(urllib.parse.unquote(sys.argv[4]))
 
-session = lt.session({'listen_interfaces': '0.0.0.0:{port}'.format(port=torrent_port)})
-read_fifo = Fifo(read_sock_path)
-write_fifo = Fifo(write_sock_path)
+downloader = Downloader(torrent_port)
 
-torrent_handle = None
-downloading_game_id = 0
+downloader.start_download(initial_download['game_id'], initial_download['magnet'], initial_download['save_path'])
 
-def get_eta(status):
-    remaining_bytes = status.total_wanted - status.total_wanted_done
+class Handler(BaseHTTPRequestHandler):
+    rpc_password_header = 'x-hydra-rpc-password'
 
-    if remaining_bytes >= 0 and status.download_rate > 0:
-        return (remaining_bytes / status.download_rate) * 1000
-    else:
-        return 1
+    def do_GET(self):
+        if self.path == "/status":
+            if self.headers.get(self.rpc_password_header) != rpc_password:
+                self.send_response(401)
+                self.end_headers()
+                return
 
-def start_download(game_id: int, magnet: str, save_path: str):
-    global torrent_handle
-    global downloading_game_id
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
 
-    params = {'url': magnet, 'save_path': save_path}
-    torrent_handle = session.add_torrent(params)
-    downloading_game_id = game_id
-    torrent_handle.set_flags(lt.torrent_flags.auto_managed)
-    torrent_handle.resume()
+            status = downloader.get_download_status()
 
-def pause_download():
-    global downloading_game_id
+            self.wfile.write(json.dumps(status).encode('utf-8'))
+        if self.path == "/healthcheck":
+            self.send_response(200)
+            self.end_headers()
+    
+    def do_POST(self):
+        if self.path == "/action":
+            if self.headers.get(self.rpc_password_header) != rpc_password:
+                self.send_response(401)
+                self.end_headers()
+                return
 
-    if torrent_handle:
-        torrent_handle.pause()
-        torrent_handle.unset_flags(lt.torrent_flags.auto_managed)
-        downloading_game_id = 0
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
 
-def cancel_download():
-    global downloading_game_id
-    global torrent_handle
-
-    if torrent_handle:
-        torrent_handle.pause()
-        session.remove_torrent(torrent_handle)
-        torrent_handle = None
-        downloading_game_id = 0
-
-def get_download_updates():
-    while True:
-        if downloading_game_id == 0:
-            time.sleep(0.5)
-            continue
-
-        status = torrent_handle.status()
-        info = torrent_handle.get_torrent_info()
-
-        write_fifo.send_message(json.dumps({
-            'folderName': info.name() if info else "",
-            'fileSize': info.total_size() if info else 0,
-            'gameId': downloading_game_id,
-            'progress': status.progress,
-            'downloadSpeed': status.download_rate,
-            'timeRemaining': get_eta(status),
-            'numPeers': status.num_peers,
-            'numSeeds': status.num_seeds,
-            'status': status.state,
-            'bytesDownloaded': status.progress * info.total_size() if info else status.all_time_download,
-        }))
-
-        if status.progress == 1:
-            cancel_download()
-
-        time.sleep(0.5)
-
-def listen_to_socket():
-    while True:
-        msg = read_fifo.recv(1024 * 2)
-        payload = json.loads(msg.decode("utf-8"))
-
-        if payload['action'] == "start":
-            start_download(payload['game_id'], payload['magnet'], payload['save_path'])
-            continue
+            if data['action'] == 'start':
+                downloader.start_download(data['game_id'], data['magnet'], data['save_path'])
+            elif data['action'] == 'pause':
+                downloader.pause_download(data['game_id'])
+            elif data['action'] == 'cancel':
+                downloader.cancel_download(data['game_id'])
         
-        if payload['action'] == "pause":
-            pause_download()
-            continue
-            
-        if payload['action'] == "cancel":
-            cancel_download()
+            self.send_response(200)
+            self.end_headers()
+
 
 if __name__ == "__main__":
-    p1 = threading.Thread(target=get_download_updates)
-    p2 = threading.Thread(target=listen_to_socket)
-
-    p1.start()
-    p2.start()
+    httpd = HTTPServer(("", int(http_port)), Handler)
+    httpd.serve_forever()
