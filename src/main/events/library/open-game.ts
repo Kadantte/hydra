@@ -1,18 +1,15 @@
-import { gameRepository } from "@main/repository";
-
 import { registerEvent } from "../register-event";
-import { shell } from "electron";
+import { GameShop } from "@types";
+import { launchGame } from "@main/helpers";
 
 const openGame = async (
   _event: Electron.IpcMainInvokeEvent,
-  gameId: number,
-  executablePath: string
+  shop: GameShop,
+  objectId: string,
+  executablePath: string,
+  launchOptions?: string | null
 ) => {
-  await gameRepository.update({ id: gameId }, { executablePath });
-
-  shell.openPath(executablePath);
+  await launchGame({ shop, objectId, executablePath, launchOptions });
 };
 
-registerEvent(openGame, {
-  name: "openGame",
-});
+registerEvent("openGame", openGame);

@@ -1,84 +1,102 @@
-import { DownloadIcon, FileDirectoryIcon } from "@primer/octicons-react";
-import type { CatalogueEntry } from "@types";
+import { DownloadIcon, PeopleIcon } from "@primer/octicons-react";
+import type { GameStats, ShopAssets } from "@types";
 
 import SteamLogo from "@renderer/assets/steam-logo.svg?react";
-import EpicGamesLogo from "@renderer/assets/epic-games-logo.svg?react";
 
-import { AsyncImage } from "../async-image/async-image";
+import "./game-card.scss";
 
-import * as styles from "./game-card.css";
-import { useAppSelector } from "@renderer/hooks";
 import { useTranslation } from "react-i18next";
+import { Badge } from "../badge/badge";
+import { StarRating } from "../star-rating/star-rating";
+import { useCallback, useState } from "react";
+import { useFormat } from "@renderer/hooks";
 
 export interface GameCardProps
   extends React.DetailedHTMLProps<
     React.ButtonHTMLAttributes<HTMLButtonElement>,
     HTMLButtonElement
   > {
-  game: CatalogueEntry;
-  disabled?: boolean;
+  game: ShopAssets;
 }
 
 const shopIcon = {
-  epic: <EpicGamesLogo className={styles.shopIcon} />,
-  steam: <SteamLogo className={styles.shopIcon} />,
+  steam: <SteamLogo className="game-card__shop-icon" />,
 };
 
-export function GameCard({ game, disabled, ...props }: GameCardProps) {
+export function GameCard({ game, ...props }: GameCardProps) {
   const { t } = useTranslation("game_card");
 
-  const repackersFriendlyNames = useAppSelector(
-    (state) => state.repackersFriendlyNames.value
-  );
+  const [stats, setStats] = useState<GameStats | null>(null);
 
-  const uniqueRepackers = Array.from(
-    new Set(game.repacks.map(({ repacker }) => repacker))
-  );
+  const handleHover = useCallback(() => {
+    if (!stats) {
+      window.electron.getGameStats(game.objectId, game.shop).then((stats) => {
+        setStats(stats);
+      });
+    }
+  }, [game, stats]);
+
+  const { numberFormatter } = useFormat();
 
   return (
     <button
       {...props}
       type="button"
-      className={styles.card({ disabled })}
-      disabled={disabled}
+      className="game-card"
+      onMouseEnter={handleHover}
     >
-      <div className={styles.backdrop}>
-        <AsyncImage
-          src={game.cover}
+      <div className="game-card__backdrop">
+        <img
+          src={game.libraryImageUrl ?? undefined}
           alt={game.title}
-          className={styles.cover}
+          className="game-card__cover"
+          loading="lazy"
         />
 
-        <div className={styles.content}>
-          <div className={styles.titleContainer}>
+        <div className="game-card__content">
+          <div className="game-card__title-container">
             {shopIcon[game.shop]}
-            <p className={styles.title}>{game.title}</p>
+            <p className="game-card__title">{game.title}</p>
           </div>
 
-          {uniqueRepackers.length > 0 ? (
-            <ul className={styles.downloadOptions}>
-              {uniqueRepackers.map((repacker) => (
-                <li key={repacker} className={styles.downloadOption}>
-                  <span>{repackersFriendlyNames[repacker]}</span>
+          {game.downloadSources.length > 0 ? (
+            <ul className="game-card__download-options">
+              {game.downloadSources.slice(0, 3).map((sourceName) => (
+                <li key={sourceName}>
+                  <Badge>{sourceName}</Badge>
                 </li>
               ))}
+              {game.downloadSources.length > 3 && (
+                <li>
+                  <Badge>
+                    +{game.downloadSources.length - 3}{" "}
+                    {t("game_card:available", {
+                      count: game.downloadSources.length - 3,
+                    })}
+                  </Badge>
+                </li>
+              )}
             </ul>
           ) : (
-            <p className={styles.noDownloadsLabel}>{t("no_downloads")}</p>
+            <p className="game-card__no-download-label">{t("no_downloads")}</p>
           )}
 
-          <div className={styles.specifics}>
-            <div className={styles.specificsItem}>
+          <div className="game-card__specifics">
+            <div className="game-card__specifics-item">
               <DownloadIcon />
-              <span>{game.repacks.length}</span>
+              <span>
+                {stats ? numberFormatter.format(stats.downloadCount) : "…"}
+              </span>
             </div>
-
-            {game.repacks.length > 0 && (
-              <div className={styles.specificsItem}>
-                <FileDirectoryIcon />
-                <span>{game.repacks.at(0)?.fileSize}</span>
-              </div>
-            )}
+            <div className="game-card__specifics-item">
+              <PeopleIcon />
+              <span>
+                {stats ? numberFormatter.format(stats.playerCount) : "…"}
+              </span>
+            </div>
+            <div className="game-card__specifics-item">
+              <StarRating rating={stats?.averageScore || null} size={14} />
+            </div>
           </div>
         </div>
       </div>

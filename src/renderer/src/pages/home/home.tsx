@@ -1,137 +1,206 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { levelDBService } from "@renderer/services/leveldb.service";
+import { orderBy } from "lodash-es";
+import { useNavigate } from "react-router-dom";
 
 import Skeleton, { SkeletonTheme } from "react-loading-skeleton";
 
 import { Button, GameCard, Hero } from "@renderer/components";
-import type { CatalogueCategory, CatalogueEntry } from "@types";
+import type { DownloadSource, ShopAssets, Steam250Game } from "@types";
 
-import starsAnimation from "@renderer/assets/lottie/stars.json";
+import flameIconStatic from "@renderer/assets/icons/flame-static.png";
+import flameIconAnimated from "@renderer/assets/icons/flame-animated.gif";
+import starsIconAnimated from "@renderer/assets/icons/stars-animated.gif";
 
-import * as styles from "./home.css";
-import { vars } from "../../theme.css";
-import Lottie from "lottie-react";
+import { buildGameDetailsPath, ensureArray } from "@renderer/helpers";
+import { CatalogueCategory } from "@shared";
+import "./home.scss";
 
-const categories: CatalogueCategory[] = ["trending", "recently_added"];
-
-export function Home() {
+export default function Home() {
   const { t } = useTranslation("home");
   const navigate = useNavigate();
 
+  const [animateFlame, setAnimateFlame] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingRandomGame, setIsLoadingRandomGame] = useState(false);
-  const randomGameObjectID = useRef<string | null>(null);
+  const [randomGame, setRandomGame] = useState<Steam250Game | null>(null);
 
-  const [searchParams] = useSearchParams();
+  const [currentCatalogueCategory, setCurrentCatalogueCategory] = useState(
+    CatalogueCategory.Hot
+  );
 
   const [catalogue, setCatalogue] = useState<
-    Record<CatalogueCategory, CatalogueEntry[]>
+    Record<CatalogueCategory, ShopAssets[]>
   >({
-    trending: [],
-    recently_added: [],
+    [CatalogueCategory.Hot]: [],
+    [CatalogueCategory.Weekly]: [],
+    [CatalogueCategory.Achievements]: [],
   });
 
-  const getCatalogue = useCallback((category: CatalogueCategory) => {
-    setIsLoading(true);
+  const getCatalogue = useCallback(async (category: CatalogueCategory) => {
+    try {
+      setCurrentCatalogueCategory(category);
+      setIsLoading(true);
 
-    window.electron
-      .getCatalogue(category)
-      .then((catalogue) => {
-        setCatalogue((prev) => ({ ...prev, [category]: catalogue }));
-      })
-      .catch(() => {})
-      .finally(() => {
-        setIsLoading(false);
-      });
+      const sources = (await levelDBService.values(
+        "downloadSources"
+      )) as DownloadSource[];
+      const downloadSources = orderBy(sources, "createdAt", "desc");
+
+      const params = {
+        take: 12,
+        skip: 0,
+        downloadSourceIds: downloadSources.map((source) => source.id),
+      };
+
+      const catalogue = await window.electron.hydraApi.get<ShopAssets[]>(
+        `/catalogue/${category}`,
+        {
+          params,
+          needsAuth: false,
+        }
+      );
+
+      setCatalogue((prev) => ({
+        ...prev,
+        [category]: ensureArray<ShopAssets>(
+          catalogue,
+          `/catalogue/${category}`
+        ),
+      }));
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
-  const currentCategory = searchParams.get("category") || categories[0];
-
-  const handleSelectCategory = (category: CatalogueCategory) => {
-    if (category !== currentCategory) {
-      getCatalogue(category);
-      navigate(`/?category=${category}`);
-    }
-  };
-
   const getRandomGame = useCallback(() => {
-    setIsLoadingRandomGame(true);
-
-    window.electron.getRandomGame().then((objectID) => {
-      if (objectID) {
-        randomGameObjectID.current = objectID;
-        setIsLoadingRandomGame(false);
-      }
+    window.electron.getRandomGame().then((game) => {
+      if (game) setRandomGame(game);
     });
   }, []);
 
   const handleRandomizerClick = () => {
-    const searchParams = new URLSearchParams({
-      fromRandomizer: "1",
-    });
+    if (randomGame) {
+      navigate(
+        buildGameDetailsPath(
+          { ...randomGame, shop: "steam" },
+          {
+            fromRandomizer: "1",
+          }
+        )
+      );
+    }
+  };
 
-    navigate(
-      `/game/steam/${randomGameObjectID.current}?${searchParams.toString()}`
-    );
+  const handleCategoryClick = (category: CatalogueCategory) => {
+    if (category !== currentCatalogueCategory) {
+      getCatalogue(category);
+    }
   };
 
   useEffect(() => {
     setIsLoading(true);
-    getCatalogue(currentCategory as CatalogueCategory);
+    getCatalogue(CatalogueCategory.Hot);
+
     getRandomGame();
-  }, [getCatalogue, currentCategory, getRandomGame]);
+  }, [getCatalogue, getRandomGame]);
+
+  const categories = Object.values(CatalogueCategory);
+
+  const handleMouseEnterCategory = (category: CatalogueCategory) => {
+    if (category === CatalogueCategory.Hot) {
+      setAnimateFlame(true);
+    }
+  };
+
+  const handleMouseLeaveCategory = (category: CatalogueCategory) => {
+    if (category === CatalogueCategory.Hot) {
+      setAnimateFlame(false);
+    }
+  };
 
   return (
-    <SkeletonTheme baseColor={vars.color.background} highlightColor="#444">
-      <section className={styles.content}>
-        <h2>{t("featured")}</h2>
-
+    <SkeletonTheme baseColor="#1c1c1c" highlightColor="#444">
+      <section className="home__content">
         <Hero />
 
-        <section className={styles.homeHeader}>
-          <div className={styles.homeCategories}>
+        <section className="home__header">
+          <ul className="home__buttons-list">
             {categories.map((category) => (
-              <Button
-                key={category}
-                theme={currentCategory === category ? "primary" : "outline"}
-                onClick={() => handleSelectCategory(category)}
-              >
-                {t(category)}
-              </Button>
+              <li key={category}>
+                <Button
+                  theme={
+                    category === currentCatalogueCategory
+                      ? "primary"
+                      : "outline"
+                  }
+                  onClick={() => handleCategoryClick(category)}
+                  onMouseEnter={() => handleMouseEnterCategory(category)}
+                  onMouseLeave={() => handleMouseLeaveCategory(category)}
+                >
+                  {category === CatalogueCategory.Hot && (
+                    <div className="home__icon-wrapper">
+                      <img
+                        src={flameIconStatic}
+                        alt=""
+                        className="home__flame-icon"
+                        style={{ display: animateFlame ? "none" : "block" }}
+                      />
+                      <img
+                        src={flameIconAnimated}
+                        alt=""
+                        className="home__flame-icon"
+                        style={{ display: animateFlame ? "block" : "none" }}
+                      />
+                    </div>
+                  )}
+
+                  {t(category)}
+                </Button>
+              </li>
             ))}
-          </div>
+          </ul>
 
           <Button
             onClick={handleRandomizerClick}
             theme="outline"
-            disabled={isLoadingRandomGame}
+            disabled={!randomGame}
           >
-            <div style={{ width: 16, height: 16, position: "relative" }}>
-              <Lottie
-                animationData={starsAnimation}
-                style={{ width: 70, position: "absolute", top: -28, left: -27 }}
-                loop
+            <div className="home__icon-wrapper">
+              <img
+                src={starsIconAnimated}
+                alt=""
+                className="home__stars-icon"
               />
             </div>
             {t("surprise_me")}
           </Button>
         </section>
 
-        <h2>{t(currentCategory)}</h2>
+        <h2 className="home__title">
+          {currentCatalogueCategory === CatalogueCategory.Hot && (
+            <div className="home__title-icon">
+              <img
+                src={flameIconAnimated}
+                alt=""
+                className="home__title-flame-icon"
+              />
+            </div>
+          )}
 
-        <section className={styles.cards}>
+          {t(currentCatalogueCategory)}
+        </h2>
+
+        <section className="home__cards">
           {isLoading
             ? Array.from({ length: 12 }).map((_, index) => (
-                <Skeleton key={index} className={styles.cardSkeleton} />
+                <Skeleton key={index} className="home__card-skeleton" />
               ))
-            : catalogue[currentCategory as CatalogueCategory].map((result) => (
+            : catalogue[currentCatalogueCategory].map((result) => (
                 <GameCard
-                  key={result.objectID}
+                  key={result.objectId}
                   game={result}
-                  onClick={() =>
-                    navigate(`/game/${result.shop}/${result.objectID}`)
-                  }
+                  onClick={() => navigate(buildGameDetailsPath(result))}
                 />
               ))}
         </section>

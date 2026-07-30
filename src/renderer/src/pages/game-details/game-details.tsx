@@ -1,326 +1,216 @@
-import Color from "color";
-import { average } from "color.js";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
-import type {
-  Game,
-  GameRepack,
-  GameShop,
-  HowLongToBeatCategory,
-  ShopDetails,
-  SteamAppDetails,
-} from "@types";
+import type { GameRepack, GameShop, Steam250Game } from "@types";
 
-import { AsyncImage, Button } from "@renderer/components";
-import { setHeaderTitle } from "@renderer/features";
-import { getSteamLanguage, steamUrlBuilder } from "@renderer/helpers";
-import { useAppDispatch, useDownload } from "@renderer/hooks";
+import { Button, ConfirmationModal } from "@renderer/components";
+import { buildGameDetailsPath } from "@renderer/helpers";
 
-import starsAnimation from "@renderer/assets/lottie/stars.json";
+import starsIconAnimated from "@renderer/assets/icons/stars-animated.gif";
 
-import Lottie from "lottie-react";
 import { useTranslation } from "react-i18next";
 import { SkeletonTheme } from "react-loading-skeleton";
-import { DescriptionHeader } from "./description-header";
 import { GameDetailsSkeleton } from "./game-details-skeleton";
-import * as styles from "./game-details.css";
-import { HeroPanel } from "./hero";
-import { HowLongToBeatSection } from "./how-long-to-beat-section";
-import { RepacksModal } from "./repacks-modal";
 
-import { vars } from "../../theme.css";
+import { GameDetailsContent } from "./game-details-content";
 import {
-  DODIInstallationGuide,
-  DONT_SHOW_DODI_INSTRUCTIONS_KEY,
-  DONT_SHOW_ONLINE_FIX_INSTRUCTIONS_KEY,
-  OnlineFixInstallationGuide,
-} from "./installation-guides";
+  CloudSyncContextConsumer,
+  CloudSyncContextProvider,
+  GameDetailsContextConsumer,
+  GameDetailsContextProvider,
+} from "@renderer/context";
+import { useDownload } from "@renderer/hooks";
+import { GameOptionsModal, RepacksModal } from "./modals";
+import { Downloader, getDownloadersForUri } from "@shared";
+import { CloudSyncFilesModal } from "./cloud-sync-files-modal/cloud-sync-files-modal";
+import "./game-details.scss";
+import "./hero.scss";
 
-export function GameDetails() {
-  const { objectID, shop } = useParams();
+export default function GameDetails() {
+  const [randomGame, setRandomGame] = useState<Steam250Game | null>(null);
+  const [randomizerLocked, setRandomizerLocked] = useState(false);
 
-  const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingRandomGame, setIsLoadingRandomGame] = useState(false);
-  const [color, setColor] = useState({ dark: "", light: "" });
-  const [gameDetails, setGameDetails] = useState<ShopDetails | null>(null);
-  const [howLongToBeat, setHowLongToBeat] = useState<{
-    isLoading: boolean;
-    data: HowLongToBeatCategory[] | null;
-  }>({ isLoading: true, data: null });
-
-  const [game, setGame] = useState<Game | null>(null);
-  const [isGamePlaying, setIsGamePlaying] = useState(false);
-  const [showInstructionsModal, setShowInstructionsModal] = useState<
-    null | "onlinefix" | "DODI"
-  >(null);
-
-  const [activeRequirement, setActiveRequirement] =
-    useState<keyof SteamAppDetails["pc_requirements"]>("minimum");
-
-  const navigate = useNavigate();
+  const { objectId, shop } = useParams();
   const [searchParams] = useSearchParams();
 
-  const { t, i18n } = useTranslation("game_details");
+  const fromRandomizer = searchParams.get("fromRandomizer");
+  const gameTitle = searchParams.get("title");
 
-  const [showRepacksModal, setShowRepacksModal] = useState(false);
+  const { startDownload, addGameToQueue } = useDownload();
 
-  const dispatch = useAppDispatch();
+  const { t } = useTranslation("game_details");
 
-  const { game: gameDownloading, startDownload, isDownloading } = useDownload();
-
-  const handleImageSettled = useCallback((url: string) => {
-    average(url, { amount: 1, format: "hex" })
-      .then((color) => {
-        const darkColor = new Color(color).darken(0.6).toString() as string;
-        setColor({ light: color as string, dark: darkColor });
-      })
-      .catch(() => {});
-  }, []);
-
-  const getGame = useCallback(() => {
-    window.electron
-      .getGameByObjectID(objectID!)
-      .then((result) => setGame(result));
-  }, [setGame, objectID]);
+  const navigate = useNavigate();
 
   useEffect(() => {
-    getGame();
-  }, [getGame, gameDownloading?.id]);
+    setRandomGame(null);
+    window.electron.getRandomGame().then((randomGame) => {
+      setRandomGame(randomGame);
+    });
+  }, [objectId]);
 
-  useEffect(() => {
-    setGame(null);
-    setIsLoading(true);
-    setIsGamePlaying(false);
-    dispatch(setHeaderTitle(""));
+  const handleRandomizerClick = () => {
+    if (randomGame) {
+      navigate(
+        buildGameDetailsPath(
+          { ...randomGame, shop: "steam" },
+          { fromRandomizer: "1" }
+        )
+      );
 
-    window.electron
-      .getGameShopDetails(objectID!, "steam", getSteamLanguage(i18n.language))
-      .then((result) => {
-        if (!result) {
-          navigate(-1);
-          return;
-        }
+      setRandomizerLocked(true);
 
-        window.electron
-          .getHowLongToBeat(objectID!, "steam", result.name)
-          .then((data) => {
-            setHowLongToBeat({ isLoading: false, data });
-          });
+      const zero = performance.now();
 
-        setGameDetails(result);
-        dispatch(setHeaderTitle(result.name));
-        setIsLoadingRandomGame(false);
-      })
-      .finally(() => {
-        setIsLoading(false);
-      });
-
-    getGame();
-    setHowLongToBeat({ isLoading: true, data: null });
-  }, [getGame, dispatch, navigate, objectID, i18n.language]);
-
-  const isGameDownloading = isDownloading && gameDownloading?.id === game?.id;
-
-  useEffect(() => {
-    if (isGameDownloading)
-      setGame((prev) => {
-        if (prev === null || !gameDownloading?.status) return prev;
-        return { ...prev, status: gameDownloading?.status };
-      });
-  }, [isGameDownloading, gameDownloading?.status]);
-
-  useEffect(() => {
-    const listeners = [
-      window.electron.onGameClose(() => {
-        if (isGamePlaying) setIsGamePlaying(false);
-      }),
-      window.electron.onPlaytime((gameId) => {
-        if (gameId === game?.id) {
-          if (!isGamePlaying) setIsGamePlaying(true);
-          getGame();
-        }
-      }),
-    ];
-
-    return () => {
-      listeners.forEach((unsubscribe) => unsubscribe());
-    };
-  }, [game?.id, isGamePlaying, getGame]);
-
-  const handleStartDownload = async (
-    repack: GameRepack,
-    downloadPath: string
-  ) => {
-    if (gameDetails) {
-      return startDownload(
-        repack.id,
-        gameDetails.objectID,
-        gameDetails.name,
-        shop as GameShop,
-        downloadPath
-      ).then(() => {
-        getGame();
-        setShowRepacksModal(false);
-
-        if (
-          repack.repacker === "onlinefix" &&
-          !window.localStorage.getItem(DONT_SHOW_ONLINE_FIX_INSTRUCTIONS_KEY)
-        ) {
-          setShowInstructionsModal("onlinefix");
-        } else if (
-          repack.repacker === "DODI" &&
-          !window.localStorage.getItem(DONT_SHOW_DODI_INSTRUCTIONS_KEY)
-        ) {
-          setShowInstructionsModal("DODI");
+      requestAnimationFrame(function animateLock(time) {
+        if (time - zero <= 1000) {
+          requestAnimationFrame(animateLock);
+        } else {
+          setRandomizerLocked(false);
         }
       });
     }
   };
 
-  const handleRandomizerClick = async () => {
-    setIsLoadingRandomGame(true);
-    const randomGameObjectID = await window.electron.getRandomGame();
-
-    const searchParams = new URLSearchParams({
-      fromRandomizer: "1",
-    });
-
-    navigate(`/game/steam/${randomGameObjectID}?${searchParams.toString()}`);
-  };
-
-  const fromRandomizer = searchParams.get("fromRandomizer");
+  const selectRepackUri = (repack: GameRepack, downloader: Downloader) =>
+    repack.uris.find((uri) => getDownloadersForUri(uri).includes(downloader))!;
 
   return (
-    <SkeletonTheme baseColor={vars.color.background} highlightColor="#444">
-      {gameDetails && (
-        <RepacksModal
-          visible={showRepacksModal}
-          gameDetails={gameDetails}
-          startDownload={handleStartDownload}
-          onClose={() => setShowRepacksModal(false)}
-        />
-      )}
+    <GameDetailsContextProvider
+      gameTitle={gameTitle!}
+      shop={shop! as GameShop}
+      objectId={objectId!}
+    >
+      <GameDetailsContextConsumer>
+        {({
+          isLoading,
+          game,
+          gameTitle,
+          shop,
+          showRepacksModal,
+          showGameOptionsModal,
+          gameOptionsInitialCategory,
+          hasNSFWContentBlocked,
+          setHasNSFWContentBlocked,
+          updateGame,
+          setShowRepacksModal,
+          setShowGameOptionsModal,
+          setGameOptionsInitialCategory, // ADD THIS
+        }) => {
+          const handleStartDownload = async (
+            repack: GameRepack,
+            downloader: Downloader,
+            downloadPath: string,
+            automaticallyExtract: boolean,
+            addToQueueOnly = false,
+            fileIndices?: number[],
+            selectedFilesSize?: number | null,
+            automaticallyDeleteArchiveFiles = false,
+            signal?: AbortSignal
+          ) => {
+            const payload = {
+              objectId: objectId!,
+              title: gameTitle,
+              downloader,
+              shop,
+              downloadPath,
+              uri: selectRepackUri(repack, downloader),
+              automaticallyExtract,
+              automaticallyDeleteArchiveFiles,
+              fileSize: repack.fileSize,
+              fileIndices,
+              selectedFilesSize,
+            };
 
-      <OnlineFixInstallationGuide
-        visible={showInstructionsModal === "onlinefix"}
-        onClose={() => setShowInstructionsModal(null)}
-      />
+            const response = addToQueueOnly
+              ? await addGameToQueue(payload, signal)
+              : await startDownload(payload, signal);
 
-      <DODIInstallationGuide
-        windowColor={color.light}
-        visible={showInstructionsModal === "DODI"}
-        onClose={() => setShowInstructionsModal(null)}
-      />
+            if (response.ok) {
+              await updateGame();
+              setShowRepacksModal(false);
+              setShowGameOptionsModal(false);
+              setGameOptionsInitialCategory("general");
+            }
 
-      {isLoading ? (
-        <GameDetailsSkeleton />
-      ) : (
-        <section className={styles.container}>
-          <div className={styles.hero}>
-            <AsyncImage
-              src={steamUrlBuilder.libraryHero(objectID!)}
-              className={styles.heroImage}
-              alt={game?.title}
-              onSettled={handleImageSettled}
-            />
-            <div className={styles.heroBackdrop}>
-              <div className={styles.heroContent}>
-                <AsyncImage
-                  src={steamUrlBuilder.logo(objectID!)}
-                  style={{ width: 300, alignSelf: "flex-end" }}
+            return response;
+          };
+
+          const handleNSFWContentRefuse = () => {
+            setHasNSFWContentBlocked(false);
+            navigate(-1);
+          };
+
+          return (
+            <CloudSyncContextProvider objectId={objectId!} shop={shop}>
+              <CloudSyncContextConsumer>
+                {({ showCloudSyncFilesModal, setShowCloudSyncFilesModal }) => (
+                  <>
+                    <CloudSyncFilesModal
+                      onClose={() => setShowCloudSyncFilesModal(false)}
+                      visible={showCloudSyncFilesModal}
+                    />
+                  </>
+                )}
+              </CloudSyncContextConsumer>
+
+              <SkeletonTheme baseColor="#1c1c1c" highlightColor="#444">
+                {isLoading ? <GameDetailsSkeleton /> : <GameDetailsContent />}
+
+                <RepacksModal
+                  visible={showRepacksModal}
+                  startDownload={handleStartDownload}
+                  onClose={() => setShowRepacksModal(false)}
                 />
-              </div>
-            </div>
-          </div>
 
-          <HeroPanel
-            game={game}
-            color={color.dark}
-            gameDetails={gameDetails}
-            openRepacksModal={() => setShowRepacksModal(true)}
-            getGame={getGame}
-            isGamePlaying={isGamePlaying}
-          />
+                <ConfirmationModal
+                  visible={hasNSFWContentBlocked}
+                  onClose={handleNSFWContentRefuse}
+                  title={t("nsfw_content_title")}
+                  descriptionText={t("nsfw_content_description", {
+                    title: gameTitle,
+                  })}
+                  confirmButtonLabel={t("allow_nsfw_content")}
+                  cancelButtonLabel={t("refuse_nsfw_content")}
+                  onConfirm={() => setHasNSFWContentBlocked(false)}
+                  clickOutsideToClose={false}
+                />
 
-          <div className={styles.descriptionContainer}>
-            <div className={styles.descriptionContent}>
-              <DescriptionHeader gameDetails={gameDetails} />
+                {game && (
+                  <GameOptionsModal
+                    visible={showGameOptionsModal}
+                    game={game}
+                    onClose={() => {
+                      setShowGameOptionsModal(false);
+                      setGameOptionsInitialCategory("general");
+                    }}
+                    initialCategory={gameOptionsInitialCategory}
+                    onNavigateHome={() => navigate("/")}
+                  />
+                )}
 
-              <div
-                dangerouslySetInnerHTML={{
-                  __html: gameDetails?.about_the_game ?? "",
-                }}
-                className={styles.description}
-              />
-            </div>
-
-            <div className={styles.contentSidebar}>
-              <HowLongToBeatSection
-                howLongToBeatData={howLongToBeat.data}
-                isLoading={howLongToBeat.isLoading}
-              />
-
-              <div
-                className={styles.contentSidebarTitle}
-                style={{ border: "none" }}
-              >
-                <h3>{t("requirements")}</h3>
-              </div>
-
-              <div className={styles.requirementButtonContainer}>
-                <Button
-                  className={styles.requirementButton}
-                  onClick={() => setActiveRequirement("minimum")}
-                  theme={
-                    activeRequirement === "minimum" ? "primary" : "outline"
-                  }
-                >
-                  {t("minimum")}
-                </Button>
-                <Button
-                  className={styles.requirementButton}
-                  onClick={() => setActiveRequirement("recommended")}
-                  theme={
-                    activeRequirement === "recommended" ? "primary" : "outline"
-                  }
-                >
-                  {t("recommended")}
-                </Button>
-              </div>
-
-              <div
-                className={styles.requirementsDetails}
-                dangerouslySetInnerHTML={{
-                  __html:
-                    gameDetails?.pc_requirements?.[activeRequirement] ??
-                    t(`no_${activeRequirement}_requirements`, {
-                      title: gameDetails?.name,
-                    }),
-                }}
-              />
-            </div>
-          </div>
-        </section>
-      )}
-
-      {fromRandomizer && (
-        <Button
-          className={styles.randomizerButton}
-          onClick={handleRandomizerClick}
-          theme="outline"
-          disabled={isLoadingRandomGame}
-        >
-          <div style={{ width: 16, height: 16, position: "relative" }}>
-            <Lottie
-              animationData={starsAnimation}
-              style={{ width: 70, position: "absolute", top: -28, left: -27 }}
-              loop
-            />
-          </div>
-          {t("next_suggestion")}
-        </Button>
-      )}
-    </SkeletonTheme>
+                {fromRandomizer && (
+                  <Button
+                    className="game-details__randomizer-button"
+                    onClick={handleRandomizerClick}
+                    theme="outline"
+                    disabled={!randomGame || randomizerLocked}
+                  >
+                    <div className="game-details__stars-icon-container">
+                      <img
+                        src={starsIconAnimated}
+                        alt=""
+                        className="game-details__stars-icon"
+                      />
+                    </div>
+                    {t("next_suggestion")}
+                  </Button>
+                )}
+              </SkeletonTheme>
+            </CloudSyncContextProvider>
+          );
+        }}
+      </GameDetailsContextConsumer>
+    </GameDetailsContextProvider>
   );
 }

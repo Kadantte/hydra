@@ -1,70 +1,291 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 
-import type { Game } from "@types";
+import type { LibraryGame } from "@types";
 
-import { AsyncImage, TextField } from "@renderer/components";
-import { useDownload, useLibrary } from "@renderer/hooks";
-import { SPACING_UNIT } from "../../theme.css";
-
+import { ConfirmationModal, TextField } from "@renderer/components";
+import { useDownload, useLibrary, useToast } from "@renderer/hooks";
 import { routes } from "./routes";
 
-import { MarkGithubIcon } from "@primer/octicons-react";
-import DiscordLogo from "@renderer/assets/discord-icon.svg?react";
-import XLogo from "@renderer/assets/x-icon.svg?react";
+import "./sidebar.scss";
 
-import * as styles from "./sidebar.css";
+import {
+  buildGameDetailsPath,
+  filterLibraryGamesByCategory,
+  sortLibraryGames,
+} from "@renderer/helpers";
+import type { LibraryCategory } from "@renderer/pages/library/category-filter";
+import type { SortOption } from "@renderer/pages/library/filter-options";
+
+import { PlayIcon, VideoIcon } from "@primer/octicons-react";
+import { Tooltip } from "react-tooltip";
+import deckyIcon from "@renderer/assets/icons/decky.png";
+import cn from "classnames";
+import { SidebarFilterMenu } from "./sidebar-filter-menu";
+import { SidebarGameItem } from "./sidebar-game-item";
+import { SidebarProfile } from "./sidebar-profile";
 
 const SIDEBAR_MIN_WIDTH = 200;
 const SIDEBAR_INITIAL_WIDTH = 250;
 const SIDEBAR_MAX_WIDTH = 450;
+const SIDEBAR_GAME_ITEM_HEIGHT = 42;
+
+const SIDEBAR_CATEGORIES = new Set<LibraryCategory>(["all", "pc", "classics"]);
+const SIDEBAR_SORT_OPTIONS = new Set<SortOption>([
+  "title_asc",
+  "recently_played",
+  "most_played",
+  "achievements",
+]);
+
+const isGamePlayable = (game: LibraryGame) =>
+  Boolean(game.executablePath) ||
+  (game.shop === "launchbox" && (game.discs?.length ?? 0) > 0);
 
 const initialSidebarWidth = window.localStorage.getItem("sidebarWidth");
 
 export function Sidebar() {
-  const { t } = useTranslation("sidebar");
+  const { t } = useTranslation(["sidebar", "library"]);
   const { library, updateLibrary } = useLibrary();
+  const [deckyPluginInfo, setDeckyPluginInfo] = useState<{
+    installed: boolean;
+    version: string | null;
+    outdated: boolean;
+  }>({ installed: false, version: null, outdated: false });
+  const [homebrewFolderExists, setHomebrewFolderExists] = useState(false);
+  const [showDeckyConfirmModal, setShowDeckyConfirmModal] = useState(false);
   const navigate = useNavigate();
 
-  const [filteredLibrary, setFilteredLibrary] = useState<Game[]>([]);
+  const filterRef = useRef<HTMLInputElement>(null);
 
   const [isResizing, setIsResizing] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(
     initialSidebarWidth ? Number(initialSidebarWidth) : SIDEBAR_INITIAL_WIDTH
   );
 
-  const socials = [
-    {
-      url: "https://discord.gg/hydralauncher",
-      icon: <DiscordLogo />,
-      label: t("discord"),
-    },
-    {
-      url: "https://twitter.com/hydralauncher",
-      icon: <XLogo />,
-      label: t("x"),
-    },
-    {
-      url: "https://github.com/hydralauncher/hydra",
-      icon: <MarkGithubIcon size={16} />,
-      label: t("github"),
-    },
-  ];
-
   const location = useLocation();
 
-  const { game: gameDownloading, progress } = useDownload();
+  const [sidebarCategory, setSidebarCategory] = useState<LibraryCategory>(
+    () => {
+      const saved = localStorage.getItem("sidebar-category");
+      if (SIDEBAR_CATEGORIES.has(saved as LibraryCategory)) {
+        return saved as LibraryCategory;
+      }
+      return "all";
+    }
+  );
+
+  const [sidebarSortBy, setSidebarSortBy] = useState<SortOption>(() => {
+    const saved = localStorage.getItem("sidebar-sort-by");
+    if (SIDEBAR_SORT_OPTIONS.has(saved as SortOption)) {
+      return saved as SortOption;
+    }
+    return "title_asc";
+  });
+
+  const [showFavoritesFirst, setShowFavoritesFirst] = useState<boolean>(() => {
+    return localStorage.getItem("sidebar-favorites-first") !== "false";
+  });
+
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
+  const [showPlayableOnly, setShowPlayableOnly] = useState(false);
+
+  const uniquePlatforms = useMemo(() => {
+    const set = new Set<string>();
+    for (const game of library) {
+      if (game.shop === "launchbox" && game.platform) {
+        set.add(game.platform);
+      }
+    }
+    return Array.from(set).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" })
+    );
+  }, [library]);
+
+  const sortedLibrary = useMemo(() => {
+    let games = filterLibraryGamesByCategory(library, sidebarCategory);
+
+    if (sidebarCategory === "classics" && selectedPlatforms.length > 0) {
+      const platforms = new Set(selectedPlatforms);
+      games = games.filter(
+        (game) => game.platform && platforms.has(game.platform)
+      );
+    }
+
+    games = sortLibraryGames(games, sidebarSortBy);
+
+    if (showFavoritesFirst) {
+      games = [
+        ...games.filter((game) => game.favorite),
+        ...games.filter((game) => !game.favorite),
+      ];
+    }
+
+    return games;
+  }, [
+    library,
+    sidebarCategory,
+    sidebarSortBy,
+    selectedPlatforms,
+    showFavoritesFirst,
+  ]);
+
+  const { lastPacket, progress } = useDownload();
+
+  const { showSuccessToast, showErrorToast } = useToast();
+
+  const [isGameListScrolled, setIsGameListScrolled] = useState(false);
+  const [scrollbarWidth, setScrollbarWidth] = useState(0);
+
+  const gameListRef = useRef<HTMLDivElement>(null);
+
+  const [filteredLibrary, setFilteredLibrary] = useState<LibraryGame[]>([]);
+  const [filterQuery, setFilterQuery] = useState("");
+
+  useEffect(() => {
+    setFilteredLibrary(sortedLibrary);
+    setFilterQuery("");
+
+    if (filterRef.current) {
+      filterRef.current.value = "";
+    }
+  }, [sortedLibrary]);
+
+  const visibleGames = useMemo(
+    () =>
+      filteredLibrary.filter(
+        (game) => !showPlayableOnly || isGamePlayable(game)
+      ),
+    [filteredLibrary, showPlayableOnly]
+  );
+
+  const hasActiveFilter =
+    library.length > 0 &&
+    (sidebarCategory !== "all" ||
+      selectedPlatforms.length > 0 ||
+      showPlayableOnly ||
+      filterQuery.trim().length > 0);
+
+  const virtualizer = useVirtualizer({
+    count: visibleGames.length,
+    getScrollElement: () => gameListRef.current,
+    estimateSize: () => SIDEBAR_GAME_ITEM_HEIGHT,
+    overscan: 5,
+  });
+
+  useEffect(() => {
+    const el = gameListRef.current;
+    if (!el) return;
+    const measure = () => setScrollbarWidth(el.offsetWidth - el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const handleFilter: React.ChangeEventHandler<HTMLInputElement> = (event) => {
+    setFilterQuery(event.target.value);
+    setFilteredLibrary(
+      sortedLibrary.filter((game) =>
+        (game.title ?? "")
+          .toLowerCase()
+          .includes(event.target.value.toLocaleLowerCase())
+      )
+    );
+  };
+
+  const handleSidebarCategoryChange = useCallback((next: LibraryCategory) => {
+    setSidebarCategory(next);
+    localStorage.setItem("sidebar-category", next);
+    if (next !== "classics") {
+      setSelectedPlatforms([]);
+    }
+  }, []);
+
+  const handleSidebarSortChange = useCallback((next: SortOption) => {
+    setSidebarSortBy(next);
+    localStorage.setItem("sidebar-sort-by", next);
+  }, []);
+
+  const handleToggleFavoritesFirst = useCallback((next: boolean) => {
+    setShowFavoritesFirst(next);
+    localStorage.setItem("sidebar-favorites-first", String(next));
+  }, []);
+
+  const loadDeckyPluginInfo = async () => {
+    if (window.electron.platform !== "linux") return;
+
+    try {
+      const [info, folderExists] = await Promise.all([
+        window.electron.getHydraDeckyPluginInfo(),
+        window.electron.checkHomebrewFolderExists(),
+      ]);
+
+      setDeckyPluginInfo({
+        installed: info.installed,
+        version: info.version,
+        outdated: info.outdated,
+      });
+      setHomebrewFolderExists(folderExists);
+    } catch (error) {
+      console.error("Failed to load Decky plugin info:", error);
+    }
+  };
+
+  const handleInstallHydraDeckyPlugin = () => {
+    if (deckyPluginInfo.installed && !deckyPluginInfo.outdated) {
+      return;
+    }
+    setShowDeckyConfirmModal(true);
+  };
+
+  const handleConfirmDeckyInstallation = async () => {
+    setShowDeckyConfirmModal(false);
+
+    try {
+      const result = await window.electron.installHydraDeckyPlugin();
+
+      if (result.success) {
+        showSuccessToast(
+          t("decky_plugin_installed", {
+            version: result.currentVersion,
+          })
+        );
+        await loadDeckyPluginInfo();
+      } else {
+        showErrorToast(
+          t("decky_plugin_installation_failed", {
+            error: result.error || "Unknown error",
+          })
+        );
+      }
+    } catch (error) {
+      showErrorToast(
+        t("decky_plugin_installation_error", { error: String(error) })
+      );
+    }
+  };
 
   useEffect(() => {
     updateLibrary();
-  }, [gameDownloading?.id, updateLibrary]);
+  }, [lastPacket?.gameId, updateLibrary]);
 
-  const isDownloading = library.some((game) =>
-    ["downloading", "checking_files", "downloading_metadata"].includes(
-      game.status
-    )
-  );
+  useEffect(() => {
+    const handlePinToggled = () => {
+      void updateLibrary();
+    };
+
+    window.addEventListener("hydra:game-pin-toggled", handlePinToggled);
+    return () => {
+      window.removeEventListener("hydra:game-pin-toggled", handlePinToggled);
+    };
+  }, [updateLibrary]);
+
+  useEffect(() => {
+    loadDeckyPluginInfo();
+  }, []);
 
   const sidebarRef = useRef<HTMLElement>(null);
 
@@ -80,22 +301,8 @@ export function Sidebar() {
       sidebarRef.current?.clientWidth || SIDEBAR_INITIAL_WIDTH;
   };
 
-  const handleFilter: React.ChangeEventHandler<HTMLInputElement> = (event) => {
-    setFilteredLibrary(
-      library.filter((game) =>
-        game.title
-          .toLowerCase()
-          .includes(event.target.value.toLocaleLowerCase())
-      )
-    );
-  };
-
   useEffect(() => {
-    setFilteredLibrary(library);
-  }, [library]);
-
-  useEffect(() => {
-    window.onmousemove = (event) => {
+    window.onmousemove = (event: MouseEvent) => {
       if (isResizing) {
         const cursorXDelta = event.screenX - cursorPos.current.x;
         const newWidth = Math.max(
@@ -121,25 +328,25 @@ export function Sidebar() {
     };
   }, [isResizing]);
 
-  const getGameTitle = (game: Game) => {
-    if (game.status === "paused") return t("paused", { title: game.title });
-
-    if (gameDownloading?.id === game.id) {
-      const isVerifying = ["downloading_metadata", "checking_files"].includes(
-        gameDownloading?.status
-      );
-
-      if (isVerifying)
-        return t(gameDownloading.status, {
-          title: game.title,
-          percentage: progress,
-        });
-
+  const getGameTitle = (game: LibraryGame) => {
+    if (lastPacket?.gameId === game.id) {
       return t("downloading", {
         title: game.title,
         percentage: progress,
       });
     }
+
+    if (
+      game.download?.queued &&
+      game.download.status !== "removed" &&
+      game.download.status !== "complete" &&
+      game.download.status !== "seeding"
+    ) {
+      return t("queued", { title: game.title });
+    }
+
+    if (game.download?.status === "paused")
+      return t("paused", { title: game.title });
 
     return game.title;
   };
@@ -150,111 +357,203 @@ export function Sidebar() {
     }
   };
 
+  const handleSidebarGameClick = (game: LibraryGame) => {
+    const path = buildGameDetailsPath({
+      ...game,
+      objectId: game.objectId,
+    });
+    if (path !== location.pathname) {
+      navigate(path);
+    }
+  };
+
   return (
     <aside
       ref={sidebarRef}
-      className={styles.sidebar({ resizing: isResizing })}
+      className={cn("sidebar", {
+        "sidebar--resizing": isResizing,
+        "sidebar--darwin": window.electron.platform === "darwin",
+      })}
       style={{
         width: sidebarWidth,
         minWidth: sidebarWidth,
         maxWidth: sidebarWidth,
       }}
     >
-      <div
-        className={styles.content({
-          macos: window.electron.platform === "darwin",
-        })}
-      >
-        {window.electron.platform === "darwin" && (
-          <h2 style={{ marginBottom: SPACING_UNIT }}>Hydra</h2>
-        )}
+      {globalThis.window.electron.platform === "darwin" && (
+        <button
+          type="button"
+          className="sidebar__big-picture-darwin"
+          onClick={() => globalThis.window.electron.openBigPictureWindow()}
+        >
+          <VideoIcon size={14} />
+          {t("big_picture")}
+        </button>
+      )}
 
-        <section className={styles.section({ hasBorder: false })}>
-          <ul className={styles.menu}>
-            {routes.map(({ nameKey, path, render }) => (
-              <li
-                key={nameKey}
-                className={styles.menuItem({
-                  active: location.pathname === path,
-                })}
-              >
-                <button
-                  type="button"
-                  className={styles.menuItemButton}
-                  onClick={() => handleSidebarItemClick(path)}
+      <div className="sidebar__container">
+        <SidebarProfile />
+
+        <div className="sidebar__content">
+          <section className="sidebar__section">
+            <ul className="sidebar__menu">
+              {routes.map(({ nameKey, path, render }) => (
+                <li
+                  key={nameKey}
+                  className={cn("sidebar__menu-item", {
+                    "sidebar__menu-item--active": location.pathname === path,
+                  })}
                 >
-                  {render(isDownloading)}
-                  <span>{t(nameKey)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
+                  <button
+                    type="button"
+                    className="sidebar__menu-item-button"
+                    onClick={() => handleSidebarItemClick(path)}
+                  >
+                    {render()}
+                    <span>{t(nameKey)}</span>
+                  </button>
+                </li>
+              ))}
 
-        <section className={styles.section({ hasBorder: false })}>
-          <small className={styles.sectionTitle}>{t("my_library")}</small>
+              {window.electron.platform === "linux" && homebrewFolderExists && (
+                <li className="sidebar__menu-item sidebar__menu-item--decky">
+                  <button
+                    type="button"
+                    className="sidebar__menu-item-button"
+                    onClick={handleInstallHydraDeckyPlugin}
+                  >
+                    <img
+                      src={deckyIcon}
+                      alt=""
+                      style={{ width: 16, height: 16 }}
+                    />
+                    <span>
+                      {deckyPluginInfo.installed && !deckyPluginInfo.outdated
+                        ? t("decky_plugin_installed_version", {
+                            version: deckyPluginInfo.version,
+                          })
+                        : deckyPluginInfo.installed && deckyPluginInfo.outdated
+                          ? t("update_decky_plugin")
+                          : t("install_decky_plugin")}
+                    </span>
+                  </button>
+                </li>
+              )}
+            </ul>
+          </section>
 
-          <TextField
-            placeholder={t("filter")}
-            onChange={handleFilter}
-            theme="dark"
-          />
+          <section className="sidebar__section sidebar__section--games">
+            <div className="sidebar__search-row">
+              <TextField
+                ref={filterRef}
+                placeholder={t("filter")}
+                onChange={handleFilter}
+                theme="dark"
+              />
 
-          <ul className={styles.menu}>
-            {filteredLibrary.map((game) => (
-              <li
-                key={game.id}
-                className={styles.menuItem({
-                  active:
-                    location.pathname === `/game/${game.shop}/${game.objectID}`,
-                  muted: game.status === "cancelled",
+              <button
+                type="button"
+                className={cn("sidebar__play-button", {
+                  "sidebar__play-button--active": showPlayableOnly,
                 })}
+                onClick={() => setShowPlayableOnly((prev) => !prev)}
+                data-tooltip-id="sidebar-show-playable-only-tooltip"
+                data-tooltip-content={t("show_playable_only_tooltip")}
+                data-tooltip-place="top"
               >
-                <button
-                  type="button"
-                  className={styles.menuItemButton}
-                  onClick={() =>
-                    handleSidebarItemClick(
-                      `/game/${game.shop}/${game.objectID}`
-                    )
-                  }
+                <PlayIcon size={16} />
+              </button>
+
+              <Tooltip id="sidebar-show-playable-only-tooltip" place="top" />
+
+              <SidebarFilterMenu
+                category={sidebarCategory}
+                onCategoryChange={handleSidebarCategoryChange}
+                sortBy={sidebarSortBy}
+                onSortChange={handleSidebarSortChange}
+                showFavoritesFirst={showFavoritesFirst}
+                onToggleFavoritesFirst={handleToggleFavoritesFirst}
+                platforms={uniquePlatforms}
+                selectedPlatforms={selectedPlatforms}
+                onPlatformsChange={setSelectedPlatforms}
+              />
+            </div>
+
+            <div
+              className={`sidebar__game-list${isGameListScrolled ? " sidebar__game-list--scrolled" : ""}`}
+            >
+              <div
+                ref={gameListRef}
+                className="sidebar__game-list-scroll"
+                onScroll={(e) =>
+                  setIsGameListScrolled(
+                    (e.currentTarget as HTMLElement).scrollTop > 0
+                  )
+                }
+              >
+                {hasActiveFilter && visibleGames.length === 0 && (
+                  <p className="sidebar__game-list-empty">
+                    {t("library:no_results")}
+                  </p>
+                )}
+
+                <div
+                  style={{
+                    height: `${virtualizer.getTotalSize()}px`,
+                    position: "relative",
+                  }}
                 >
-                  <AsyncImage className={styles.gameIcon} src={game.iconUrl} />
-                  <span className={styles.menuItemButtonLabel}>
-                    {getGameTitle(game)}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
+                  {virtualizer.getVirtualItems().map((virtualItem) => {
+                    const game = visibleGames[virtualItem.index];
+                    return (
+                      <div
+                        key={game.id}
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          right: 16 - scrollbarWidth,
+                          transform: `translateY(${virtualItem.start}px)`,
+                        }}
+                      >
+                        <SidebarGameItem
+                          game={game}
+                          handleSidebarGameClick={handleSidebarGameClick}
+                          getGameTitle={getGameTitle}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
       </div>
 
       <button
         type="button"
-        className={styles.handle}
+        className="sidebar__handle"
         onMouseDown={handleMouseDown}
       />
 
-      <footer className={styles.sidebarFooter}>
-        <div className={styles.footerText}>{t("follow_us")}</div>
-
-        <span className={styles.footerSocialsContainer}>
-          {socials.map((item) => {
-            return (
-              <button
-                key={item.url}
-                className={styles.footerSocialsItem}
-                onClick={() => window.electron.openExternal(item.url)}
-                title={item.label}
-                aria-label={item.label}
-              >
-                {item.icon}
-              </button>
-            );
-          })}
-        </span>
-      </footer>
+      <ConfirmationModal
+        visible={showDeckyConfirmModal}
+        title={
+          deckyPluginInfo.installed && deckyPluginInfo.outdated
+            ? t("update_decky_plugin_title")
+            : t("install_decky_plugin_title")
+        }
+        descriptionText={
+          deckyPluginInfo.installed && deckyPluginInfo.outdated
+            ? t("update_decky_plugin_message")
+            : t("install_decky_plugin_message")
+        }
+        onClose={() => setShowDeckyConfirmModal(false)}
+        onConfirm={handleConfirmDeckyInstallation}
+        cancelButtonLabel={t("cancel")}
+        confirmButtonLabel={t("confirm")}
+      />
     </aside>
   );
 }

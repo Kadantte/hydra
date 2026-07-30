@@ -1,12 +1,22 @@
-import { dialog } from "electron";
+import { BrowserWindow, dialog } from "electron";
 import { WindowManager } from "@main/services";
 import { registerEvent } from "../register-event";
 
 const showOpenDialog = async (
-  _event: Electron.IpcMainInvokeEvent,
+  event: Electron.IpcMainInvokeEvent,
   options: Electron.OpenDialogOptions
-) => dialog.showOpenDialog(WindowManager.mainWindow, options);
+) => {
+  const senderWindow = BrowserWindow.fromWebContents(event.sender);
 
-registerEvent(showOpenDialog, {
-  name: "showOpenDialog",
-});
+  if (senderWindow && !senderWindow.isDestroyed()) {
+    return dialog.showOpenDialog(senderWindow, options);
+  }
+
+  if (WindowManager.mainWindow) {
+    return dialog.showOpenDialog(WindowManager.mainWindow, options);
+  }
+
+  throw new Error("Main window is not available");
+};
+
+registerEvent("showOpenDialog", showOpenDialog);

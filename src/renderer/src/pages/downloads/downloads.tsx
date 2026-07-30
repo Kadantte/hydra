@@ -1,268 +1,215 @@
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
 
-import { AsyncImage, Button, TextField } from "@renderer/components";
-import { formatDownloadProgress, steamUrlBuilder } from "@renderer/helpers";
-import { useDownload, useLibrary } from "@renderer/hooks";
-import type { Game } from "@types";
+import {
+  useAppSelector,
+  useDownload,
+  useDownloadLayout,
+  useLibrary,
+} from "@renderer/hooks";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BinaryNotFoundModal } from "../shared-modals/binary-not-found-modal";
-import * as styles from "./downloads.css";
-import { DeleteModal } from "./delete-modal";
-import { formatBytes } from "@renderer/utils";
+import "./downloads.scss";
+import { DeleteGameModal } from "./delete-game-modal";
+import { DownloadGroup } from "./download-group";
+import {
+  getDownloadId,
+  getRendererDownloadBucket,
+  type GameShop,
+  type LibraryGame,
+  type SeedingStatus,
+} from "../../../../types";
+import { orderBy } from "lodash-es";
+import { ArrowDownIcon } from "@primer/octicons-react";
 
-export function Downloads() {
+export default function Downloads() {
   const { library, updateLibrary } = useLibrary();
+  const { layoutState } = useDownloadLayout();
+  const extraction = useAppSelector((state) => state.download.extraction);
 
   const { t } = useTranslation("downloads");
 
-  const navigate = useNavigate();
+  const gameToBeDeleted = useRef<[GameShop, string] | null>(null);
 
-  const gameToBeDeleted = useRef<number | null>(null);
-
-  const [filteredLibrary, setFilteredLibrary] = useState<Game[]>([]);
   const [showBinaryNotFoundModal, setShowBinaryNotFoundModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
-  const {
-    game: gameDownloading,
-    progress,
-    isDownloading,
-    numPeers,
-    numSeeds,
-    pauseDownload,
-    resumeDownload,
-    removeGameFromLibrary,
-    cancelDownload,
-    deleteGame,
-    isGameDeleting,
-  } = useDownload();
+  const { removeGameInstaller, pauseSeeding } = useDownload();
 
-  const libraryWithDownloadedGamesOnly = useMemo(() => {
-    return library.filter((game) => game.status);
-  }, [library]);
+  const handleDeleteGame = async () => {
+    if (gameToBeDeleted.current) {
+      const [shop, objectId] = gameToBeDeleted.current;
+
+      await pauseSeeding(shop, objectId);
+      await removeGameInstaller(shop, objectId);
+    }
+  };
+
+  const { lastPacket } = useDownload();
+
+  const [seedingStatus, setSeedingStatus] = useState<SeedingStatus[]>([]);
 
   useEffect(() => {
-    setFilteredLibrary(libraryWithDownloadedGamesOnly);
-  }, [libraryWithDownloadedGamesOnly]);
+    window.electron.onSeedingStatus((value) => setSeedingStatus(value));
 
-  const openGameInstaller = (gameId: number) =>
-    window.electron.openGameInstaller(gameId).then((isBinaryInPath) => {
-      if (!isBinaryInPath) setShowBinaryNotFoundModal(true);
+    const unsubscribeExtraction = window.electron.onExtractionComplete(() => {
       updateLibrary();
     });
 
-  const getFinalDownloadSize = (game: Game) => {
-    const isGameDownloading = isDownloading && gameDownloading?.id === game?.id;
+    return () => {
+      unsubscribeExtraction();
+    };
+  }, [updateLibrary]);
 
-    if (!game) return "N/A";
-    if (game.fileSize) return formatBytes(game.fileSize);
+  const handleOpenGameInstaller = (shop: GameShop, objectId: string) =>
+    window.electron.openGameInstaller(shop, objectId).then((wasOpened) => {
+      if (!wasOpened) {
+        setShowBinaryNotFoundModal(true);
+      }
 
-    if (gameDownloading?.fileSize && isGameDownloading)
-      return formatBytes(gameDownloading.fileSize);
+      updateLibrary();
+    });
 
-    return game.repack?.fileSize ?? "N/A";
-  };
-
-  const getGameInfo = (game: Game) => {
-    const isGameDownloading = isDownloading && gameDownloading?.id === game?.id;
-    const finalDownloadSize = getFinalDownloadSize(game);
-
-    if (isGameDeleting(game?.id)) {
-      return <p>{t("deleting")}</p>;
-    }
-
-    if (isGameDownloading) {
-      return (
-        <>
-          <p>{progress}</p>
-
-          {gameDownloading?.status !== "downloading" ? (
-            <p>{t(gameDownloading?.status)}</p>
-          ) : (
-            <>
-              <p>
-                {formatBytes(gameDownloading?.bytesDownloaded)} /{" "}
-                {finalDownloadSize}
-              </p>
-              <p>
-                {numPeers} peers / {numSeeds} seeds
-              </p>
-            </>
-          )}
-        </>
-      );
-    }
-
-    if (game?.status === "seeding") {
-      return (
-        <>
-          <p>{game?.repack.title}</p>
-          <p>{t("completed")}</p>
-        </>
-      );
-    }
-    if (game?.status === "cancelled") return <p>{t("cancelled")}</p>;
-    if (game?.status === "downloading_metadata")
-      return <p>{t("starting_download")}</p>;
-
-    if (game?.status === "paused") {
-      return (
-        <>
-          <p>{formatDownloadProgress(game.progress)}</p>
-          <p>{t("paused")}</p>
-        </>
-      );
-    }
-  };
-
-  const openDeleteModal = (gameId: number) => {
-    gameToBeDeleted.current = gameId;
+  const handleOpenDeleteGameModal = (shop: GameShop, objectId: string) => {
+    gameToBeDeleted.current = [shop, objectId];
     setShowDeleteModal(true);
   };
 
-  const getGameActions = (game: Game) => {
-    const isGameDownloading = isDownloading && gameDownloading?.id === game?.id;
+  const libraryGroup: Record<string, LibraryGame[]> = useMemo(() => {
+    const initialValue: Record<string, LibraryGame[]> = {
+      downloading: [],
+      queued: [],
+      complete: [],
+    };
 
-    const deleting = isGameDeleting(game.id);
-
-    if (isGameDownloading) {
-      return (
-        <>
-          <Button onClick={() => pauseDownload(game.id)} theme="outline">
-            {t("pause")}
-          </Button>
-          <Button onClick={() => cancelDownload(game.id)} theme="outline">
-            {t("cancel")}
-          </Button>
-        </>
-      );
-    }
-
-    if (game?.status === "paused") {
-      return (
-        <>
-          <Button onClick={() => resumeDownload(game.id)} theme="outline">
-            {t("resume")}
-          </Button>
-          <Button onClick={() => cancelDownload(game.id)} theme="outline">
-            {t("cancel")}
-          </Button>
-        </>
-      );
-    }
-
-    if (game?.status === "seeding") {
-      return (
-        <>
-          <Button
-            onClick={() => openGameInstaller(game.id)}
-            theme="outline"
-            disabled={deleting}
-          >
-            {t("install")}
-          </Button>
-
-          <Button onClick={() => openDeleteModal(game.id)} theme="outline">
-            {t("delete")}
-          </Button>
-        </>
-      );
-    }
-
-    if (game?.status === "downloading_metadata") {
-      return (
-        <Button onClick={() => cancelDownload(game.id)} theme="outline">
-          {t("cancel")}
-        </Button>
-      );
-    }
-
-    return (
-      <>
-        <Button
-          onClick={() => navigate(`/game/${game.shop}/${game.objectID}`)}
-          theme="outline"
-          disabled={deleting}
-        >
-          {t("download_again")}
-        </Button>
-
-        <Button
-          onClick={() => removeGameFromLibrary(game.id)}
-          theme="outline"
-          disabled={deleting}
-        >
-          {t("remove_from_list")}
-        </Button>
-      </>
+    const queueOrder = layoutState.queueOrder;
+    const pausedOrder = layoutState.pausedOrder;
+    const queueOrderIndex = new Map(queueOrder.map((id, index) => [id, index]));
+    const pausedOrderIndex = new Map(
+      pausedOrder.map((id, index) => [id, index])
     );
-  };
 
-  const handleFilter: React.ChangeEventHandler<HTMLInputElement> = (event) => {
-    setFilteredLibrary(
-      libraryWithDownloadedGamesOnly.filter((game) =>
-        game.title
-          .toLowerCase()
-          .includes(event.target.value.toLocaleLowerCase())
-      )
+    const result = library.reduce((prev, next) => {
+      if (!next.download) return prev;
+
+      const bucket = getRendererDownloadBucket(next.download, {
+        hasLiveProgress:
+          lastPacket?.gameId === next.id && next.download.status === "active",
+        isExtracting: extraction?.visibleId === next.id,
+      });
+
+      if (bucket === "hidden") return prev;
+      if (bucket === "inProgress") {
+        return { ...prev, downloading: [...prev.downloading, next] };
+      }
+
+      if (bucket === "queued") {
+        return { ...prev, queued: [...prev.queued, next] };
+      }
+
+      return { ...prev, complete: [...prev.complete, next] };
+    }, initialValue);
+
+    const queued = [...result.queued].sort((left, right) => {
+      const leftDownload = left.download!;
+      const rightDownload = right.download!;
+      const leftId = getDownloadId(leftDownload);
+      const rightId = getDownloadId(rightDownload);
+      const leftInQueue = queueOrderIndex.get(leftId);
+      const rightInQueue = queueOrderIndex.get(rightId);
+      const leftInPaused = pausedOrderIndex.get(leftId);
+      const rightInPaused = pausedOrderIndex.get(rightId);
+
+      if (leftInQueue != null && rightInQueue != null) {
+        return leftInQueue - rightInQueue;
+      }
+
+      if (leftInQueue != null) return -1;
+      if (rightInQueue != null) return 1;
+
+      if (leftInPaused != null && rightInPaused != null) {
+        return leftInPaused - rightInPaused;
+      }
+
+      return (leftDownload.timestamp ?? 0) - (rightDownload.timestamp ?? 0);
+    });
+
+    const complete = orderBy(result.complete, (game) =>
+      game.download?.progress === 1 ? 0 : 1
     );
-  };
+
+    return {
+      ...result,
+      queued,
+      complete,
+    };
+  }, [extraction?.visibleId, lastPacket?.gameId, layoutState, library]);
+
+  const queuedGameIds = useMemo(
+    () => libraryGroup.queued.map((game) => game.id),
+    [libraryGroup.queued]
+  );
+
+  const downloadGroups = [
+    {
+      title: t("download_in_progress"),
+      library: libraryGroup.downloading,
+      queuedGameIds: [] as string[],
+    },
+    {
+      title: t("queued_downloads"),
+      library: libraryGroup.queued,
+      queuedGameIds,
+    },
+    {
+      title: t("downloads_completed"),
+      library: libraryGroup.complete,
+      queuedGameIds: [] as string[],
+    },
+  ];
+
+  const hasItemsInLibrary = useMemo(() => {
+    return Object.values(libraryGroup).some((group) => group.length > 0);
+  }, [libraryGroup]);
 
   return (
-    <section className={styles.downloadsContainer}>
+    <>
       <BinaryNotFoundModal
         visible={showBinaryNotFoundModal}
         onClose={() => setShowBinaryNotFoundModal(false)}
       />
-      <DeleteModal
+
+      <DeleteGameModal
         visible={showDeleteModal}
         onClose={() => setShowDeleteModal(false)}
-        deleteGame={() =>
-          deleteGame(gameToBeDeleted.current).then(updateLibrary)
-        }
+        deleteGame={handleDeleteGame}
       />
 
-      <TextField placeholder={t("filter")} onChange={handleFilter} />
-
-      <ul className={styles.downloads}>
-        {filteredLibrary.map((game) => {
-          return (
-            <li
-              key={game.id}
-              className={styles.download({
-                cancelled: game.status === "cancelled",
-              })}
-            >
-              <AsyncImage
-                src={steamUrlBuilder.library(game.objectID)}
-                className={styles.downloadCover}
-                alt={game.title}
+      {hasItemsInLibrary ? (
+        <section className="downloads__container">
+          <div className="downloads__groups">
+            {downloadGroups.map((group) => (
+              <DownloadGroup
+                key={group.title}
+                title={group.title}
+                library={group.library}
+                openDeleteGameModal={handleOpenDeleteGameModal}
+                openGameInstaller={handleOpenGameInstaller}
+                seedingStatus={seedingStatus}
+                queuedGameIds={group.queuedGameIds}
               />
-              <div className={styles.downloadRightContent}>
-                <div className={styles.downloadDetails}>
-                  <button
-                    type="button"
-                    className={styles.downloadTitle}
-                    onClick={() =>
-                      navigate(`/game/${game.shop}/${game.objectID}`)
-                    }
-                  >
-                    {game.title}
-                  </button>
-
-                  {getGameInfo(game)}
-                </div>
-
-                <div className={styles.downloadActions}>
-                  {getGameActions(game)}
-                </div>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
+            ))}
+          </div>
+        </section>
+      ) : (
+        <div className="downloads__no-downloads">
+          <div className="downloads__arrow-icon">
+            <ArrowDownIcon size={24} />
+          </div>
+          <h2>{t("no_downloads_title")}</h2>
+          <p>{t("no_downloads_description")}</p>
+        </div>
+      )}
+    </>
   );
 }

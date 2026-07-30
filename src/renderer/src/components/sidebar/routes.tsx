@@ -1,5 +1,10 @@
-import { AppsIcon, GearIcon, HomeIcon } from "@primer/octicons-react";
-import { DownloadIcon } from "./download-icon";
+import {
+  AppsIcon,
+  DownloadIcon,
+  GearIcon,
+  HomeIcon,
+  BookIcon,
+} from "@primer/octicons-react";
 
 export const routes = [
   {
@@ -13,11 +18,14 @@ export const routes = [
     render: () => <AppsIcon />,
   },
   {
+    path: "/library",
+    nameKey: "library",
+    render: () => <BookIcon />,
+  },
+  {
     path: "/downloads",
     nameKey: "downloads",
-    render: (isDownloading: boolean) => (
-      <DownloadIcon isDownloading={isDownloading} />
-    ),
+    render: () => <DownloadIcon />,
   },
   {
     path: "/settings",

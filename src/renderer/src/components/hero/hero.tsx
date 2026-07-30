@@ -1,59 +1,77 @@
 import { useNavigate } from "react-router-dom";
-import { AsyncImage } from "@renderer/components";
-import * as styles from "./hero.css";
 import { useEffect, useState } from "react";
-import { ShopDetails } from "@types";
-import { getSteamLanguage, steamUrlBuilder } from "@renderer/helpers";
+import type { TrendingGame } from "@types";
 import { useTranslation } from "react-i18next";
-
-const FEATURED_GAME_ID = "2420110";
+import Skeleton from "react-loading-skeleton";
+import { ensureArray } from "@renderer/helpers";
+import "./hero.scss";
 
 export function Hero() {
-  const [featuredGameDetails, setFeaturedGameDetails] =
-    useState<ShopDetails | null>(null);
+  const [featuredGameDetails, setFeaturedGameDetails] = useState<
+    TrendingGame[] | null
+  >(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   const { i18n } = useTranslation();
 
   const navigate = useNavigate();
 
   useEffect(() => {
-    window.electron
-      .getGameShopDetails(
-        FEATURED_GAME_ID,
-        "steam",
-        getSteamLanguage(i18n.language)
-      )
+    setIsLoading(true);
+
+    const language = i18n.language.split("-")[0];
+
+    window.electron.hydraApi
+      .get<TrendingGame[]>("/catalogue/featured", {
+        params: { language },
+        needsAuth: false,
+      })
       .then((result) => {
-        setFeaturedGameDetails(result);
+        setFeaturedGameDetails(
+          ensureArray<TrendingGame>(result, "/catalogue/featured").slice(0, 1)
+        );
+      })
+      .catch(() => {
+        setFeaturedGameDetails([]);
+      })
+      .finally(() => {
+        setIsLoading(false);
       });
   }, [i18n.language]);
 
-  return (
-    <button
-      type="button"
-      onClick={() => navigate(`/game/steam/${FEATURED_GAME_ID}`)}
-      className={styles.hero}
-    >
-      <div className={styles.backdrop}>
-        <AsyncImage
-          src="https://cdn2.steamgriddb.com/hero/4ef10445b952a8b3c93a9379d581146a.jpg"
-          alt={featuredGameDetails?.name}
-          className={styles.heroMedia}
-        />
+  if (isLoading) {
+    return <Skeleton className="hero" />;
+  }
 
-        <div className={styles.content}>
-          <AsyncImage
-            src={steamUrlBuilder.logo(FEATURED_GAME_ID)}
-            width="250px"
-            alt={featuredGameDetails?.name}
-            style={{ marginBottom: 16 }}
+  if (featuredGameDetails?.length) {
+    return featuredGameDetails.map((game) => (
+      <button
+        type="button"
+        onClick={() => navigate(game.uri)}
+        className="hero"
+        key={game.uri}
+      >
+        <div className="hero__backdrop">
+          <img
+            src={game.libraryHeroImageUrl ?? undefined}
+            alt={game.description ?? ""}
+            className="hero__media"
           />
 
-          <p className={styles.description}>
-            {featuredGameDetails?.short_description}
-          </p>
+          <div className="hero__content">
+            <img
+              src={game.logoImageUrl ?? undefined}
+              width="250px"
+              alt={game.description ?? ""}
+              loading="eager"
+              className="hero__logo"
+            />
+            <p className="hero__description">{game.description}</p>
+          </div>
         </div>
-      </div>
-    </button>
-  );
+      </button>
+    ));
+  }
+
+  return null;
 }

@@ -1,34 +1,13 @@
-import { WindowManager, writePipe } from "@main/services";
-
 import { registerEvent } from "../register-event";
-import { GameStatus } from "../../constants";
-import { gameRepository } from "../../repository";
-import { In } from "typeorm";
+import { DownloadOrchestrator } from "@main/services";
+import type { GameShop } from "@types";
 
 const pauseGameDownload = async (
   _event: Electron.IpcMainInvokeEvent,
-  gameId: number
+  shop: GameShop,
+  objectId: string
 ) => {
-  await gameRepository
-    .update(
-      {
-        id: gameId,
-        status: In([
-          GameStatus.Downloading,
-          GameStatus.DownloadingMetadata,
-          GameStatus.CheckingFiles,
-        ]),
-      },
-      { status: GameStatus.Paused }
-    )
-    .then((result) => {
-      if (result.affected) {
-        writePipe.write({ action: "pause" });
-        WindowManager.mainWindow?.setProgressBar(-1);
-      }
-    });
+  return DownloadOrchestrator.pauseDownloadById(shop, objectId);
 };
 
-registerEvent(pauseGameDownload, {
-  name: "pauseGameDownload",
-});
+registerEvent("pauseGameDownload", pauseGameDownload);

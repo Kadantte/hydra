@@ -1,27 +1,49 @@
 import cn from "classnames";
-import * as styles from "./button.css";
+import { PlacesType, Tooltip } from "react-tooltip";
+
+import "./button.scss";
+import { useId } from "react";
 
 export interface ButtonProps
   extends React.DetailedHTMLProps<
     React.ButtonHTMLAttributes<HTMLButtonElement>,
     HTMLButtonElement
   > {
-  theme?: keyof typeof styles.button;
+  tooltip?: string;
+  tooltipPlace?: PlacesType;
+  theme?: "primary" | "outline" | "dark" | "danger";
 }
 
 export function Button({
   children,
   theme = "primary",
   className,
+  tooltip,
+  tooltipPlace = "top",
   ...props
-}: ButtonProps) {
+}: Readonly<ButtonProps>) {
+  const id = useId();
+
+  const tooltipProps = tooltip
+    ? {
+        "data-tooltip-id": id,
+        "data-tooltip-place": tooltipPlace,
+        "data-tooltip-content": tooltip,
+      }
+    : {};
+
   return (
-    <button
-      {...props}
-      type="button"
-      className={cn(styles.button[theme], className)}
-    >
-      {children}
-    </button>
+    <>
+      <button
+        type="button"
+        className={cn("button", `button--${theme}`, className)}
+        {...props}
+        {...tooltipProps}
+      >
+        {children}
+      </button>
+
+      {tooltip && <Tooltip id={id} />}
+    </>
   );
 }
